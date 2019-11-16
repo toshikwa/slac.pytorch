@@ -123,7 +123,8 @@ class SlacAgent:
         if self.start_steps > self.steps:
             action = 2 * np.random.rand(*self.action_shape) - 1
         else:
-            states = torch.FloatTensor(states).unsqueeze(0).to(self.device)
+            states = torch.FloatTensor(
+                states.astype(np.float32)/255.0).unsqueeze(0).to(self.device)
             actions = torch.FloatTensor(actions).unsqueeze(0).to(self.device)
             action = self.explore(states, actions)
         return action

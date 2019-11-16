@@ -4,14 +4,20 @@ import torch
 
 
 class ScaledLazyFrames(object):
-    def __init__(self, frames, axis=0):
+    def __init__(self, frames, axis=0, is_image=False):
         self._frames = frames
         self.axis = axis
+        self.is_image = is_image
 
     def _force(self):
-        return np.stack(
-            np.array(self._frames, dtype=np.float32)/255.0,
-            axis=self.axis)
+        if self.is_image:
+            return np.stack(
+                np.array(self._frames, dtype=np.float32)/255.0,
+                axis=self.axis)
+        else:
+            return np.stack(
+                np.array(self._frames, dtype=np.float32),
+                axis=self.axis)
 
     def __array__(self, dtype=None):
         out = self._force()
@@ -42,9 +48,9 @@ class SequenceBuff:
         self.memory['next_state'].append(next_state)
 
     def get(self):
-        state = ScaledLazyFrames(list(self.memory['state']), 0)
+        state = ScaledLazyFrames(list(self.memory['state']), 0, True)
         action = ScaledLazyFrames(list(self.memory['action']), 0)
-        next_state = ScaledLazyFrames(list(self.memory['next_state']), 0)
+        next_state = ScaledLazyFrames(list(self.memory['next_state']), 0, True)
         return state, action, next_state
 
     def __getitem__(self, key):
