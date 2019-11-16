@@ -1,15 +1,19 @@
 import os
 import argparse
-from datetime import datetime
 import gym
+from datetime import datetime
 from dm_control import suite
 
 from env.dm_control import PixelObservationsDmControlWrapper
+from env.gym import PixelObservationsGymWrapper
 from agent import SlacAgent
 
 
 def run():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--env_type', type=str, default='dm_control')
+    parser.add_argument('--domain_name', type=str, default='cheetah')
+    parser.add_argument('--task_name', type=str, default='run')
     parser.add_argument('--env_id', type=str, default='HalfCheetah-v2')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--seed', type=int, default=0)
@@ -17,11 +21,17 @@ def run():
 
     # You can define configs in the external json or yaml file.
     configs = {
+        'env_type': args.env_type,
         'num_steps': 3000000,
         'batch_size': 256,
+        'num_sequences': 8,
         'lr': 0.0003,
+        'latent_lr': 0.0001,
+        'feature_dim': 256,
+        'latent1_dim': 32,
+        'latent2_dim': 256,
         'hidden_units': [256, 256],
-        'memory_size': 1e6,
+        'memory_size': 1e5,
         'gamma': 0.99,
         'tau': 0.005,
         'entropy_tuning': True,
@@ -36,14 +46,18 @@ def run():
         'seed': args.seed
     }
 
-    env = suite.load(domain_name="cheetah", task_name="run")
-    env = PixelObservationsDmControlWrapper(env)
-
-    # env = gym.make(args.env_id)
-    # env = PixelObservationsDmControlWrapper(env)
+    if args.env_type == 'dm_control':
+        env = suite.load(
+            domain_name=args.domain_name, task_name=args.task_name)
+        env = PixelObservationsDmControlWrapper(env)
+        dir_name = f'{args.domain_name}-{args.task_name}'
+    else:
+        env = gym.make(args.env_id)
+        env = PixelObservationsGymWrapper(env)
+        dir_name = args.env_id
 
     log_dir = os.path.join(
-        'logs', args.env_id,
+        'logs', dir_name,
         f'slac-seed{args.seed}-{datetime.now().strftime("%Y%m%d-%H%M")}')
 
     agent = SlacAgent(env=env, log_dir=log_dir, **configs)

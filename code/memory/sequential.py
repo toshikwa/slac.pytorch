@@ -1,5 +1,4 @@
 from collections import deque
-import random
 import numpy as np
 import torch
 
@@ -61,7 +60,7 @@ class SequenceBuff:
         return len(self.memory['state'])
 
 
-class Memory:
+class Memory(dict):
     keys = ['state', 'action', 'reward', 'next_state', 'done']
 
     def __init__(self, capacity, num_sequences, device):
@@ -73,30 +72,46 @@ class Memory:
 
     def reset(self):
         self._p = 0
-        self.memory = []
+        self._n = 0
+        for key in self.keys:
+            self[key] = [None] * self.capacity
         self.buff = SequenceBuff(num_sequences=self.num_sequences)
 
-    def append(self, state, action, reward, next_state, done,
-               episode_done=None):
+    def append(self, state, action, reward, next_state, done):
         self.buff.append(state, action, next_state)
 
         if len(self.buff) == self.num_sequences:
             state, action, next_state = self.buff.get()
             self._append(state, action, reward, next_state, done)
 
-        if episode_done or done:
+        if done:
             self.buff.reset()
 
     def _append(self, state, action, reward, next_state, done):
-        if len(self.memory) < self.capacity:
-            self.memory.append(None)
-        self.memory[self._p] = (state, action, reward, next_state, done)
+        self['state'][self._p] = state
+        self['action'][self._p] = action
+        self['reward'][self._p] = reward
+        self['next_state'][self._p] = next_state
+        self['done'][self._p] = done
+
+        self._n = min(self._n + 1, self.capacity)
         self._p = (self._p + 1) % self.capacity
 
     def sample(self, batch_size):
-        batch = random.sample(self.memory, batch_size)
-        states, actions, rewards, next_states, dones =\
-            map(np.stack, zip(*batch))
+        indices = np.random.randint(low=0, high=self._n, size=batch_size)
+
+        states = np.empty((batch_size, 8, 3, 64, 64), dtype=np.float32)
+        actions = np.empty((batch_size, 8, 6), dtype=np.float32)
+        rewards = np.empty((batch_size, 1), dtype=np.float32)
+        next_states = np.empty((batch_size, 8, 3, 64, 64), dtype=np.float32)
+        dones = np.empty((batch_size, 1), dtype=np.float32)
+
+        for i, index in enumerate(indices):
+            states[i, ...] = self['state'][index]
+            actions[i, ...] = self['action'][index]
+            rewards[i, ...] = self['reward'][index]
+            next_states[i, ...] = self['next_state'][index]
+            dones[i, ...] = self['done'][index]
 
         states = torch.FloatTensor(states).to(self.device)
         actions = torch.FloatTensor(actions).to(self.device)
@@ -107,4 +122,4 @@ class Memory:
         return states, actions, rewards, next_states, dones
 
     def __len__(self):
-        return len(self.memory)
+        return self._n
