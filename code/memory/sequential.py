@@ -10,7 +10,7 @@ class ScaledLazyFrames(object):
         self.axis = axis
 
     def _force(self):
-        return np.concatenate(
+        return np.stack(
             np.array(self._frames, dtype=np.float32)/255.0,
             axis=self.axis)
 
@@ -80,8 +80,9 @@ class Memory:
                episode_done=None):
         self.buff.append(state, action, next_state)
 
-        state, action, next_state = self.buff.get()
-        self._append(state, action, reward, next_state, done)
+        if len(self.buff) == self.num_sequences:
+            state, action, next_state = self.buff.get()
+            self._append(state, action, reward, next_state, done)
 
         if episode_done or done:
             self.buff.reset()

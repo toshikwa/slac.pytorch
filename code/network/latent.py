@@ -28,7 +28,7 @@ class Gaussian(BaseNetwork):
             x = torch.cat(x,  dim=-1)
 
         x = self.net(x)
-        if self.scale:
+        if self.std:
             mean = x
             std = torch.ones_like(mean) * self.std
         else:
@@ -48,7 +48,7 @@ class ConstantGaussian(BaseNetwork):
 
     def forward(self, x):
         loc = torch.zeros((x.size(0), self.output_dim)).to(x)
-        scale = torch.ones((x.size(0), self.output_dim)).to(x) * self.scale
+        scale = torch.ones((x.size(0), self.output_dim)).to(x) * self.std
         return Normal(loc=loc, scale=scale)
 
 
@@ -85,7 +85,8 @@ class Decoder(BaseNetwork):
         num_batches, num_sequences, latent_dim = x.size()
         x = x.view(num_batches * num_sequences, latent_dim, 1, 1)
         x = self.net(x)
-        x.view(num_batches, num_sequences, *x.size())
+        _, C, W, H = x.size()
+        x = x.view(num_batches, num_sequences, C, W, H)
         return Normal(loc=x, scale=torch.ones_like(x) * self.std)
 
 
@@ -125,8 +126,7 @@ class Encoder(BaseNetwork):
 class LatentNetwork(BaseNetwork):
 
     def __init__(self, observation_shape, action_shape, feature_dim=256,
-                 latent1_dim=32, latent2_dim=256, kl_analytic=True,
-                 model_reward=False, reward_std=None):
+                 latent1_dim=32, latent2_dim=256, kl_analytic=True):
         super(LatentNetwork, self).__init__()
         self.observation_shape = observation_shape
         self.action_shape = action_shape
@@ -134,7 +134,6 @@ class LatentNetwork(BaseNetwork):
         self.latent1_dim = latent1_dim
         self.latent2_dim = latent2_dim
         self.kl_analytic = kl_analytic
-        self.model_reward = model_reward
 
         # Prior distributions.
         self.latent1_initial_prior = ConstantGaussian(latent1_dim)
@@ -160,35 +159,25 @@ class LatentNetwork(BaseNetwork):
             feature_dim, latent1_dim, latent2_dim, observation_shape[0],
             std=np.sqrt(0.1))
 
-        if self.model_reward:
-            self.reward_predictor = Gaussian(
-                2*latent1_dim+2*latent2_dim+action_shape[0], 256, 1,
-                std=reward_std)
-        else:
-            self.reward_predictor = None
-
     @property
     def state_size(self):
         return self.latent1_dim + self.latent2_dim
 
-    def compute_loss(self, images, actions, start_flag, rewards=None,
-                     latent_posterior_samples=None):
+    def calc_loss(self, images, actions):
         outputs = {}
-        sequence_length = images.size(1)
 
-        if latent_posterior_samples is None:
-            posterior_samples, posterior_dists =\
-                self.sample_posterior(images, actions)
-            latent1_posterior_samples, latent2_posterior_samples =\
-                posterior_samples
-            latent1_posterior_dists, latent2_posterior_dists =\
-                posterior_dists
+        posterior_samples, posterior_dists =\
+            self.sample_posterior(images, actions)
+        latent1_posterior_samples, latent2_posterior_samples =\
+            posterior_samples
+        latent1_posterior_dists, latent2_posterior_dists =\
+            posterior_dists
 
-        # For visualization.
-        (latent1_prior_samples, latent2_prior_samples), _ =\
-            self.sample_prior_or_posterior(actions)
-        (latent1_cond_prior_samples, latent2_cond_prior_samples), _ =\
-            self.sample_prior_or_posterior(actions, images=images[:, :1])
+        # # For visualization.
+        # (latent1_prior_samples, latent2_prior_samples), _ =\
+        #     self.sample_prior_or_posterior(actions)
+        # (latent1_cond_prior_samples, latent2_cond_prior_samples), _ =\
+        #     self.sample_prior_or_posterior(actions, images=images[:, :1])
 
         prior_samples, prior_dists = self.sample_prior(images, actions)
         _, latent2_prior_samples = prior_samples
@@ -197,7 +186,7 @@ class LatentNetwork(BaseNetwork):
         latent1_kld = 0.0
         if self.kl_analytic:
             for post, pri in zip(latent1_posterior_dists, latent1_prior_dists):
-                latent1_kld += kl_divergence(post, pri)
+                latent1_kld += torch.mean(kl_divergence(post, pri))
         else:
             latent1_kld = 0.0
             for i, (post, pri) in enumerate(zip(
@@ -210,7 +199,7 @@ class LatentNetwork(BaseNetwork):
             if self.kl_analytic:
                 for post, pri in zip(
                         latent2_posterior_dists, latent2_prior_dists):
-                    latent2_kld += kl_divergence(post, pri)
+                    latent2_kld += torch.mean(kl_divergence(post, pri))
             else:
                 for i, (post, pri) in enumerate(zip(
                         latent2_posterior_dists, latent2_prior_dists)):
@@ -228,7 +217,7 @@ class LatentNetwork(BaseNetwork):
         reconstruction_error = torch.sum(
             (images - reconstruct_dists.loc).pow(2),
             dim=list(range(-len(images.shape), 0)))
-        reconstruction_error = torch.maen(reconstruction_error)
+        reconstruction_error = torch.mean(reconstruction_error)
 
         elbo = reconstruction_log_probs - latent1_kld - latent2_kld
 
@@ -240,46 +229,27 @@ class LatentNetwork(BaseNetwork):
             'reconstruction_error': reconstruction_error
         })
 
-        if self.model_reward:
-            reward_dists = self.reward_predictor([
-                latent1_posterior_samples[:, :sequence_length],
-                latent2_posterior_samples[:, :sequence_length],
-                actions[:, :sequence_length],
-                latent1_posterior_samples[:, 1:sequence_length + 1],
-                latent2_posterior_samples[:, 1:sequence_length + 1]])
-            reward_log_probs =\
-                reward_dists.log_prob(rewards[:, :sequence_length])
-            reward_log_probs[:, sequence_length] = 0
-            reward_log_probs = torch.sum(reward_log_probs, axis=1)
-            reward_reconstruction_error =\
-                (rewards[:, :sequence_length] - reward_dists.loc).pow(2)
-
-            reward_reconstruction_error[:, sequence_length] = 0
-            reward_reconstruction_error =\
-                torch.sum(reward_reconstruction_error, axis=1)
-            elbo += torch.mean(reward_log_probs)
-
         loss = -elbo
 
-        posterior_images = reconstruct_dists.mean()
-        prior_images = self.decoder([
-            latent1_prior_samples, latent2_prior_samples]).mean()
-        conditional_prior_images = self.decoder([
-            latent1_cond_prior_samples,
-            latent2_cond_prior_samples]).mean()
+        # posterior_images = reconstruct_dists.mean()
+        # prior_images = self.decoder([
+        #     latent1_prior_samples, latent2_prior_samples]).mean()
+        # conditional_prior_images = self.decoder([
+        #     latent1_cond_prior_samples,
+        #     latent2_cond_prior_samples]).mean()
 
-        outputs.update({
-            'elbo': elbo,
-            'images': images,
-            'posterior_images': posterior_images,
-            'prior_images': prior_images,
-            'conditional_prior_images': conditional_prior_images,
-        })
+        # outputs.update({
+        #     'elbo': elbo,
+        #     'images': images,
+        #     'posterior_images': posterior_images,
+        #     'prior_images': prior_images,
+        #     'conditional_prior_images': conditional_prior_images,
+        # })
 
         return loss, outputs
 
     def sample_prior_or_posterior(self, actions, images=None):
-        sequence_length = images.size(1)
+        sequence_length = actions.size(1)
         actions = actions[:, :sequence_length-1]
 
         if images is not None:
@@ -300,7 +270,7 @@ class LatentNetwork(BaseNetwork):
                 if is_conditional:
                     latent1_dist = self.latent1_initial_posterior(features[t])
                 else:
-                    latent1_dist = self.latent1_initial_prior(features[t])
+                    latent1_dist = self.latent1_initial_prior(actions[t])
                 latent1_sample = latent1_dist.sample()
 
                 if is_conditional:
@@ -374,7 +344,7 @@ class LatentNetwork(BaseNetwork):
         latent2_samples = torch.stack(latent2_samples, dim=1)
 
         return (latent1_samples, latent2_samples),\
-            (latent1_dists, latent1_dists)
+            (latent1_dists, latent2_dists)
 
     def sample_posterior(self, images, actions, features=None):
         sequence_length = images.size(1)
@@ -410,7 +380,7 @@ class LatentNetwork(BaseNetwork):
             latent1_samples.append(latent1_sample)
             latent2_samples.append(latent2_sample)
             latent1_dists.append(latent1_dist)
-            latent1_dists.append(latent2_dist)
+            latent2_dists.append(latent2_dist)
 
         latent1_samples = torch.stack(latent1_samples, dim=1)
         latent2_samples = torch.stack(latent2_samples, dim=1)
