@@ -1,7 +1,7 @@
 import torch
 from rltorch.network import create_linear_network
 
-from base import BaseNetwork
+from network.base import BaseNetwork
 
 
 class QNetwork(BaseNetwork):

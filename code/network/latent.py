@@ -1,10 +1,11 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 
-from base import BaseNetwork
+from network.base import BaseNetwork
 
 
 class Gaussian(BaseNetwork):
@@ -121,14 +122,14 @@ class Encoder(BaseNetwork):
         return x
 
 
-class ModelDistributionNetwork(BaseNetwork):
+class LatentNetwork(BaseNetwork):
 
-    def __init__(self, observation_shape, action_dim, feature_dim=256,
+    def __init__(self, observation_shape, action_shape, feature_dim=256,
                  latent1_dim=32, latent2_dim=256, kl_analytic=True,
                  model_reward=False, reward_std=None):
-        super(ModelDistributionNetwork, self).__init__()
+        super(LatentNetwork, self).__init__()
         self.observation_shape = observation_shape
-        self.action_dim = action_dim
+        self.action_shape = action_shape
         self.feature_dim = feature_dim
         self.latent1_dim = latent1_dim
         self.latent2_dim = latent2_dim
@@ -137,27 +138,32 @@ class ModelDistributionNetwork(BaseNetwork):
 
         # Prior distributions.
         self.latent1_initial_prior = ConstantGaussian(latent1_dim)
-        self.latent1_prior = Gaussian(latent2_dim+action_dim, 256, latent1_dim)
-        self.latent2_initial_prior = Gaussian(latent1_dim, 256, latent2_dim)
+        self.latent1_prior =\
+            Gaussian(latent2_dim+action_shape[0], 256, latent1_dim)
+        self.latent2_initial_prior =\
+            Gaussian(latent1_dim, 256, latent2_dim)
         self.latent2_prior =\
-            Gaussian(latent1_dim+latent2_dim+action_dim, 256, latent2_dim)
+            Gaussian(latent1_dim+latent2_dim+action_shape[0], 256, latent2_dim)
 
         # Mappings from feature to posterior distributions.
         self.latent1_initial_posterior =\
             Gaussian(feature_dim, 256, latent1_dim)
         self.latent1_posterior =\
-            Gaussian(feature_dim+latent2_dim+action_dim, 256, latent1_dim)
+            Gaussian(feature_dim+latent2_dim+action_shape[0], 256, latent1_dim)
         self.latent2_initial_posterior = self.latent2_initial_prior
         self.latent2_posterior = self.latent2_prior
 
         # Mappings from images to features.
-        self.encoder = Encoder(3, feature_dim)
+        self.encoder = Encoder(observation_shape[0], feature_dim)
         # Mappings from latent vectors to images.
-        self.decoder = Decoder(feature_dim, latent1_dim, latent2_dim, 0.3)
+        self.decoder = Decoder(
+            feature_dim, latent1_dim, latent2_dim, observation_shape[0],
+            std=np.sqrt(0.1))
 
         if self.model_reward:
             self.reward_predictor = Gaussian(
-                2*latent1_dim+2*latent2_dim+action_dim, 256, 1, std=reward_std)
+                2*latent1_dim+2*latent2_dim+action_shape[0], 256, 1,
+                std=reward_std)
         else:
             self.reward_predictor = None
 
