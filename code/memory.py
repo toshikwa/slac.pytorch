@@ -70,10 +70,11 @@ class SequenceBuff:
 class Memory(dict):
     keys = ['state', 'action', 'reward', 'done']
 
-    def __init__(self, capacity, num_sequences, device):
+    def __init__(self, capacity, num_sequences, action_shape, device):
         super(Memory, self).__init__()
         self.capacity = int(capacity)
         self.num_sequences = int(num_sequences)
+        self.action_shape = action_shape
         self.device = device
         self.reset()
 
@@ -89,7 +90,7 @@ class Memory(dict):
         self.buff.set_init_state(state)
         self.is_set_init = True
 
-    def append(self, action, reward, next_state, done):
+    def append(self, action, reward, next_state, done, episode_done=False):
         assert self.is_set_init is True
 
         self.buff.append(action, reward, next_state, done)
@@ -98,7 +99,7 @@ class Memory(dict):
             state, action, reward, done = self.buff.get()
             self._append(state, action, reward, done)
 
-        if done:
+        if done or episode_done:
             self.buff.reset()
 
     def _append(self, state, action, reward, done):
@@ -116,7 +117,8 @@ class Memory(dict):
         states = np.empty((
             batch_size, self.num_sequences, 3, 64, 64), dtype=np.float32)
         actions = np.empty((
-            batch_size, self.num_sequences-1, 6), dtype=np.float32)
+            batch_size, self.num_sequences-1, *self.action_shape),
+            dtype=np.float32)
         rewards = np.empty((
             batch_size, self.num_sequences-1, 1), dtype=np.float32)
         dones = np.empty((

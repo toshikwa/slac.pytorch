@@ -4,8 +4,8 @@ import gym
 from datetime import datetime
 from dm_control import suite
 
-from env.dm_control import PixelObservationsDmControlWrapper
-from env.gym import PixelObservationsGymWrapper
+from env import PixelObservationsDmControlWrapper,\
+    PixelObservationsGymWrapper
 from agent import SlacAgent
 
 
@@ -41,9 +41,10 @@ def run():
         'grad_clip': None,
         'updates_per_step': 1,
         'start_steps': 10000,
-        'log_interval': 10,
+        'training_log_interval': 10,
+        'learning_log_interval': 100,
         'target_update_interval': 1,
-        'eval_interval': 10000,
+        'eval_interval': 50000,
         'cuda': args.cuda,
         'seed': args.seed
     }

@@ -1,0 +1,2 @@
+from .dm_control import PixelObservationsDmControlWrapper
+from .gym import PixelObservationsGymWrapper

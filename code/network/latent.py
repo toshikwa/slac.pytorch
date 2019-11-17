@@ -246,7 +246,7 @@ class LatentNetwork(BaseNetwork):
 
         loss = kld - log_likelihoods - reward_log_likelihood
 
-        return loss, reconst_errors, reward_reconst_errors
+        return loss, reconst_errors, reward_reconst_errors, image_dists.loc
 
     def sample_prior(self, actions):
         ''' Sample from prior dynamics.

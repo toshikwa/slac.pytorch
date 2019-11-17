@@ -6,10 +6,8 @@ import torch
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 
-from memory.sequential import Memory
-from network.policy import GaussianPolicy
-from network.q_func import TwinnedQNetwork
-from network.latent import LatentNetwork
+from memory import Memory
+from network import LatentNetwork, GaussianPolicy, TwinnedQNetwork
 from utils import grad_false, hard_update, soft_update, update_params,\
     RunningMeanStats
 
@@ -21,9 +19,13 @@ class SlacAgent:
                  latent1_dim=32, latent2_dim=256, hidden_units=[256, 256],
                  memory_size=1e5, gamma=0.99, tau=0.005, entropy_tuning=True,
                  ent_coef=0.2, grad_clip=None, updates_per_step=1,
-                 start_steps=10000, log_interval=10, target_update_interval=1,
-                 eval_interval=1000, cuda=True, seed=0):
+                 start_steps=10000, training_log_interval=10,
+                 learning_log_interval=100, target_update_interval=1,
+                 eval_interval=50000, cuda=True, seed=0):
+
         self.env = env
+        self.action_shape = self.env.action_space.shape
+        self.observation_shape = self.env.observation_space.shape
 
         torch.manual_seed(seed)
         np.random.seed(seed)
@@ -33,9 +35,6 @@ class SlacAgent:
 
         self.device = torch.device(
             "cuda" if cuda and torch.cuda.is_available() else "cpu")
-
-        self.action_shape = self.env.action_space.shape
-        self.observation_shape = self.env.observation_space.shape
 
         self.latent = LatentNetwork(
             self.observation_shape, self.action_shape, feature_dim,
@@ -76,7 +75,8 @@ class SlacAgent:
         else:
             self.alpha = torch.tensor(ent_coef).to(self.device)
 
-        self.memory = Memory(memory_size, num_sequences, self.device)
+        self.memory = Memory(
+            memory_size, num_sequences, self.action_shape, self.device)
 
         self.log_dir = log_dir
         self.model_dir = os.path.join(log_dir, 'model')
@@ -87,7 +87,7 @@ class SlacAgent:
             os.makedirs(self.summary_dir)
 
         self.writer = SummaryWriter(log_dir=self.summary_dir)
-        self.train_rewards = RunningMeanStats(log_interval)
+        self.train_rewards = RunningMeanStats(training_log_interval)
 
         self.steps = 0
         self.learning_steps = 0
@@ -103,7 +103,8 @@ class SlacAgent:
         self.entropy_tuning = entropy_tuning
         self.grad_clip = grad_clip
         self.updates_per_step = updates_per_step
-        self.log_interval = log_interval
+        self.training_log_interval = training_log_interval
+        self.learning_log_interval = learning_log_interval
         self.target_update_interval = target_update_interval
         self.eval_interval = eval_interval
 
@@ -117,12 +118,9 @@ class SlacAgent:
         return len(self.memory) > self.batch_size and\
             self.steps >= self.start_steps * self.action_repeat
 
-    def act(self, state_deque, action_deque):
-        if self.start_steps > self.steps:
-            action = 2 * np.random.rand(*self.action_shape) - 1
-        else:
-            action = self.explore(state_deque, action_deque)
-        return action
+    def is_random(self, state_deque):
+        return self.start_steps > self.steps * self.action_repeat or\
+            len(state_deque) != state_deque.maxlen
 
     def deque_to_batch(self, state_deque, action_deque):
         # features: (1, 256*S)
@@ -131,7 +129,7 @@ class SlacAgent:
         with torch.no_grad():
             features = self.latent.encoder(states).view(1, -1).to(self.device)
         # actions: (1, |A|*(S-1))
-        actions = np.concatenate(action_deque, axis=0)
+        actions = np.stack(action_deque, axis=0)
         actions = torch.FloatTensor(actions).view(1, -1).to(self.device)
         # trajectories: (1, 256*S + |A|*(S-1))
         trajectories = torch.cat([features, actions], dim=-1)
@@ -150,7 +148,7 @@ class SlacAgent:
         experiences = self.deque_to_batch(state_deque, action_deque)
         with torch.no_grad():
             _, _, action = self.policy.sample(experiences)
-        return action
+        return action.cpu().numpy().reshape(-1)
 
     def train_episode(self):
         start = time()
@@ -163,39 +161,35 @@ class SlacAgent:
 
         state_deque = deque(maxlen=self.num_sequences)
         action_deque = deque(maxlen=self.num_sequences-1)
-
-        while len(state_deque) != self.num_sequences:
-            state_deque.append(state)
-        while len(action_deque) != self.num_sequences-1:
-            action_deque.append(2*np.random.rand(*self.action_shape))
+        state_deque.append(state)
 
         while not done:
-            state = np.stack(list(state_deque), axis=0)
-            action = np.stack(list(action_deque), axis=0)
-
-            next_action = self.act(state, action)
-            next_state, reward, done, _ = self.env.step(next_action)
+            if self.is_random(state_deque):
+                action = 2 * np.random.rand(*self.action_shape) - 1
+            else:
+                action = self.explore(state_deque, action_deque)
+            next_state, reward, done, _ = self.env.step(action)
             self.steps += self.action_repeat
             episode_steps += self.action_repeat
             episode_reward += reward
 
-            self.memory.append(next_action, reward, next_state, done)
+            self.memory.append(action, reward, next_state, done)
 
             if self.is_update():
                 for _ in range(self.updates_per_step):
                     self.learn()
 
             if self.steps % self.eval_interval == 0:
-                # self.evaluate()
+                self.evaluate()
                 self.save_models()
 
             state_deque.append(next_state)
-            action_deque.append(next_action)
+            action_deque.append(action)
 
         # We log running mean of training rewards.
         self.train_rewards.append(episode_reward)
 
-        if self.episodes % self.log_interval == 0:
+        if self.episodes % self.training_log_interval == 0:
             self.writer.add_scalar(
                 'reward/train', self.train_rewards.get(), self.steps)
 
@@ -203,7 +197,7 @@ class SlacAgent:
         print(f'episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '
               f'reward: {episode_reward:<5.1f}  '
-              f'time: {end - start:<3.1f}')
+              f'time: {end - start:<3.3f}')
 
     def learn(self):
         self.learning_steps += 1
@@ -214,7 +208,7 @@ class SlacAgent:
         images, actions, rewards, dones =\
             self.memory.sample(self.latent_batch_size)
         features = self.latent.encoder(images)
-        latent_loss, reconst_errors, reward_reconst_errors =\
+        latent_loss, reconst_errors, reward_reconst_errors, reconst_images =\
             self.calc_latent_loss(images, features, actions, rewards, dones)
 
         # Then, update policy and critic.
@@ -253,7 +247,7 @@ class SlacAgent:
         else:
             entropy_loss = 0.
 
-        if self.learning_steps % self.log_interval == 0:
+        if self.learning_steps % self.learning_log_interval == 0:
             self.writer.add_scalar(
                 'loss/latent', latent_loss.detach().item(),
                 self.learning_steps)
@@ -280,12 +274,19 @@ class SlacAgent:
             self.writer.add_scalar(
                 'stats/reward_reconst_errors', reward_reconst_errors,
                 self.learning_steps)
+            self.writer.add_images(
+                'images/ground_truth', images[:8, 0, ...],
+                self.learning_steps)
+            self.writer.add_images(
+                'images/reconst', reconst_images[:8, 0, ...],
+                self.learning_steps)
 
     def calc_latent_loss(self, images, features, actions, rewards, dones):
-        latent_loss, reconst_errors, reward_reconst_errors =\
+        latent_loss, reconst_errors, reward_reconst_errors, reconst_images =\
             self.latent.calc_loss(images, features, actions, rewards, dones)
 
-        return latent_loss, reconst_errors, reward_reconst_errors
+        return latent_loss, reconst_errors, reward_reconst_errors,\
+            reconst_images
 
     def calc_critic_loss(self, latents, actions, trajectories, rewards, dones):
         # Q(z(t), a(t))
@@ -325,6 +326,43 @@ class SlacAgent:
         entropy_loss = -torch.mean(
             self.log_alpha * (self.target_entropy - entropy).detach())
         return entropy_loss
+
+    def evaluate(self):
+        episodes = 10
+        returns = np.zeros((episodes,), dtype=np.float32)
+
+        for i in range(episodes):
+            state = self.env.reset()
+            episode_reward = 0.
+            done = False
+
+            state_deque = deque(maxlen=self.num_sequences)
+            action_deque = deque(maxlen=self.num_sequences-1)
+            state_deque.append(state)
+
+            while not done:
+                if self.is_random(state_deque):
+                    action = 2 * np.random.rand(*self.action_shape) - 1
+                else:
+                    action = self.exploit(state_deque, action_deque)
+                next_state, reward, done, _ = self.env.step(action)
+                episode_reward += reward
+                state_deque.append(next_state)
+                action_deque.append(action)
+
+                state = next_state
+
+            returns[i] = episode_reward
+
+        mean_return = np.mean(returns)
+        std_return = np.std(returns)
+
+        self.writer.add_scalar(
+            'reward/test', mean_return, self.steps)
+        print('-' * 60)
+        print(f'steps: {self.steps:<5}  '
+              f'reward: {mean_return:<5.1f} +/- {std_return:<5.1f}')
+        print('-' * 60)
 
     def save_models(self):
         self.latent.save(os.path.join(self.model_dir, 'latent.pth'))
