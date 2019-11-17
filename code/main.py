@@ -24,7 +24,9 @@ def run():
         'env_type': args.env_type,
         'num_steps': 3000000,
         'batch_size': 256,
+        'latent_batch_size': 32,
         'num_sequences': 8,
+        'action_repeat': 4,
         'lr': 0.0003,
         'latent_lr': 0.0001,
         'feature_dim': 256,
@@ -49,7 +51,7 @@ def run():
     if args.env_type == 'dm_control':
         env = suite.load(
             domain_name=args.domain_name, task_name=args.task_name)
-        env = PixelObservationsDmControlWrapper(env)
+        env = PixelObservationsDmControlWrapper(env, 4)
         dir_name = f'{args.domain_name}-{args.task_name}'
     else:
         env = gym.make(args.env_id)

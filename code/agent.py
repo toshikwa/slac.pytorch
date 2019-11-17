@@ -1,4 +1,5 @@
 import os
+from time import time
 from collections import deque
 import numpy as np
 import torch
@@ -15,11 +16,11 @@ from utils import grad_false, hard_update, soft_update, update_params,\
 
 class SlacAgent:
     def __init__(self, env, log_dir, env_type='dm_control', num_steps=3000000,
-                 batch_size=256, num_sequences=8, lr=0.0003, latent_lr=0.0001,
-                 feature_dim=256, latent1_dim=32, latent2_dim=256,
-                 hidden_units=[256, 256], memory_size=1e5, gamma=0.99,
-                 tau=0.005, entropy_tuning=True, ent_coef=0.2,
-                 grad_clip=None, updates_per_step=1,
+                 batch_size=256, latent_batch_size=32, num_sequences=8,
+                 action_repeat=4, lr=0.0003, latent_lr=0.0001, feature_dim=256,
+                 latent1_dim=32, latent2_dim=256, hidden_units=[256, 256],
+                 memory_size=1e5, gamma=0.99, tau=0.005, entropy_tuning=True,
+                 ent_coef=0.2, grad_clip=None, updates_per_step=1,
                  start_steps=10000, log_interval=10, target_update_interval=1,
                  eval_interval=1000, cuda=True, seed=0):
         self.env = env
@@ -41,6 +42,10 @@ class SlacAgent:
             self.action_shape = self.env.action_space.shape
             self.observation_shape = self.env.observation_space['pixels'].shape
 
+        self.latent = LatentNetwork(
+            self.observation_shape, self.action_shape, feature_dim,
+            latent1_dim, latent2_dim).to(self.device)
+
         self.policy = GaussianPolicy(
             num_sequences * feature_dim
             + (num_sequences-1) * self.action_shape[0],
@@ -53,15 +58,12 @@ class SlacAgent:
             latent1_dim+latent2_dim, self.action_shape[0], hidden_units
             ).to(self.device).eval()
 
-        self.latent = LatentNetwork(
-            self.observation_shape, self.action_shape, feature_dim,
-            latent1_dim, latent2_dim).to(self.device)
-
-        # copy parameters of the learning network to the target network
+        # Copy parameters of the learning network to the target network.
         hard_update(self.critic_target, self.critic)
-        # disable gradient calculations of the target network
+        # Disable gradient calculations of the target network.
         grad_false(self.critic_target)
 
+        # Policy is updated without the encoder.
         self.policy_optim = Adam(self.policy.parameters(), lr=lr)
         self.q1_optim = Adam(self.critic.Q1.parameters(), lr=lr)
         self.q2_optim = Adam(self.critic.Q2.parameters(), lr=lr)
@@ -77,7 +79,6 @@ class SlacAgent:
             self.alpha = self.log_alpha.exp()
             self.alpha_optim = Adam([self.log_alpha], lr=lr)
         else:
-            # fixed alpha
             self.alpha = torch.tensor(ent_coef).to(self.device)
 
         self.memory = Memory(memory_size, num_sequences, self.device)
@@ -97,9 +98,11 @@ class SlacAgent:
         self.learning_steps = 0
         self.episodes = 0
         self.num_sequences = num_sequences
+        self.action_repeat = action_repeat
         self.num_steps = num_steps
         self.tau = tau
         self.batch_size = batch_size
+        self.latent_batch_size = latent_batch_size
         self.start_steps = start_steps
         self.gamma_n = gamma
         self.entropy_tuning = entropy_tuning
@@ -117,53 +120,58 @@ class SlacAgent:
 
     def is_update(self):
         return len(self.memory) > self.batch_size and\
-            self.steps >= self.start_steps
+            self.steps >= self.start_steps * self.action_repeat
 
-    def act(self, states, actions):
+    def act(self, state_deque, action_deque):
         if self.start_steps > self.steps:
             action = 2 * np.random.rand(*self.action_shape) - 1
         else:
-            states = torch.FloatTensor(
-                states.astype(np.float32)/255.0).unsqueeze(0).to(self.device)
-            actions = torch.FloatTensor(actions).unsqueeze(0).to(self.device)
-            action = self.explore(states, actions)
+            action = self.explore(state_deque, action_deque)
         return action
 
-    def to_batch(self, states, actions):
+    def deque_to_batch(self, state_deque, action_deque):
+        # features: (1, 256*S)
+        states = (np.stack(state_deque, axis=0)/255.0).astype(np.float32)
+        states = torch.FloatTensor(states).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            features = self.latent.encoder(states)
-        num_batches = features.size(0)
-        sequence_feature = features.view(num_batches, -1)
-        sequence_action = (actions[:, :-1]).view(num_batches, -1)
-        experiences = torch.cat([sequence_feature, sequence_action], dim=-1)
-        return experiences
+            features = self.latent.encoder(states).view(1, -1).to(self.device)
+        # actions: (1, |A|*(S-1))
+        actions = np.concatenate(action_deque, axis=0)
+        actions = torch.FloatTensor(actions).view(1, -1).to(self.device)
+        # trajectories: (1, 256*S + |A|*(S-1))
+        trajectories = torch.cat([features, actions], dim=-1)
 
-    def explore(self, states, actions):
+        return trajectories
+
+    def explore(self, state_deque, action_deque):
         # act with randomness
-        experiences = self.to_batch(states, actions)
+        trajectories = self.deque_to_batch(state_deque, action_deque)
         with torch.no_grad():
-            action, _, _ = self.policy.sample(experiences)
+            action, _, _ = self.policy.sample(trajectories)
         return action.cpu().numpy().reshape(-1)
 
-    def exploit(self, states, actions):
+    def exploit(self, state_deque, action_deque):
         # act without randomness
-        experiences = self.to_batch(states, actions)
+        experiences = self.deque_to_batch(state_deque, action_deque)
         with torch.no_grad():
             _, _, action = self.policy.sample(experiences)
         return action
 
     def train_episode(self):
+        start = time()
         self.episodes += 1
         episode_reward = 0.
         episode_steps = 0
         done = False
         state = self.env.reset()
+        self.memory.set_initial_state(state)
 
         state_deque = deque(maxlen=self.num_sequences)
-        action_deque = deque(maxlen=self.num_sequences)
+        action_deque = deque(maxlen=self.num_sequences-1)
+
         while len(state_deque) != self.num_sequences:
             state_deque.append(state)
-        while len(action_deque) != self.num_sequences:
+        while len(action_deque) != self.num_sequences-1:
             action_deque.append(2*np.random.rand(*self.action_shape))
 
         while not done:
@@ -172,20 +180,19 @@ class SlacAgent:
 
             next_action = self.act(state, action)
             next_state, reward, done, _ = self.env.step(next_action)
-            self.steps += 1
-            episode_steps += 1
+            self.steps += self.action_repeat
+            episode_steps += self.action_repeat
             episode_reward += reward
 
-            self.memory.append(
-                state[-1], next_action, reward, next_state, done)
+            self.memory.append(next_action, reward, next_state, done)
 
             if self.is_update():
                 for _ in range(self.updates_per_step):
                     self.learn()
 
-            # if self.steps % self.eval_interval == 0:
-            #     self.evaluate()
-            #     self.save_models()
+            if self.steps % self.eval_interval == 0:
+                # self.evaluate()
+                self.save_models()
 
             state_deque.append(next_state)
             action_deque.append(next_action)
@@ -197,20 +204,43 @@ class SlacAgent:
             self.writer.add_scalar(
                 'reward/train', self.train_rewards.get(), self.steps)
 
+        end = time()
         print(f'episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '
-              f'reward: {episode_reward:<5.1f}')
+              f'reward: {episode_reward:<5.1f}  '
+              f'time: {end - start:<3.1f}')
 
     def learn(self):
         self.learning_steps += 1
         if self.learning_steps % self.target_update_interval == 0:
             soft_update(self.critic_target, self.critic, self.tau)
 
-        batch = self.memory.sample(self.batch_size)
+        # First, update the latent model.
+        images, actions, rewards, dones =\
+            self.memory.sample(self.latent_batch_size)
+        features = self.latent.encoder(images)
+        latent_loss, reconst_errors, reward_reconst_errors =\
+            self.calc_latent_loss(images, features, actions, rewards, dones)
 
-        latent_loss, latent_log = self.calc_latent_loss(*batch)
-        q1_loss, q2_loss = self.calc_critic_loss(*batch)
-        policy_loss, entropies = self.calc_policy_loss(*batch)
+        # Then, update policy and critic.
+        images, actions, rewards, dones =\
+            self.memory.sample(self.batch_size)
+        features = self.latent.encoder(images)
+
+        # Sample latent vectors from posterior dynamics.
+        (latents1, latents2), _ =\
+            self.latent.sample_posterior(features, actions)
+        latents = torch.cat([latents1, latents2], dim=-1)
+
+        num_batches = features.size(0)
+        feature_sequences = features.view(num_batches, -1)
+        action_sequences = actions.view(num_batches, -1)
+        trajectories = torch.cat(
+            [feature_sequences, action_sequences], dim=-1)
+
+        q1_loss, q2_loss = self.calc_critic_loss(
+            latents, actions, trajectories, rewards, dones)
+        policy_loss, entropies = self.calc_policy_loss(latents, trajectories)
 
         update_params(
             self.latent_optim, self.latent, latent_loss, self.grad_clip)
@@ -250,48 +280,46 @@ class SlacAgent:
             self.writer.add_scalar(
                 'stats/entropy', entropies.detach().mean().item(),
                 self.learning_steps)
+            self.writer.add_scalar(
+                'stats/reconst_errors', reconst_errors, self.learning_steps)
+            self.writer.add_scalar(
+                'stats/reward_reconst_errors', reward_reconst_errors,
+                self.learning_steps)
 
-    def calc_latent_loss(self, states, actions, rewards, next_states,
-                         dones):
-        latent_loss, latent_log = self.latent.calc_loss(states, actions)
-        return latent_loss, latent_log
+    def calc_latent_loss(self, images, features, actions, rewards, dones):
+        latent_loss, reconst_errors, reward_reconst_errors =\
+            self.latent.calc_loss(images, features, actions, rewards, dones)
 
-    def calc_critic_loss(self, states, actions, rewards, next_states,
-                         dones):
-        # current Q
-        (latent1, latent2), _ =\
-            self.latent.sample_posterior(states, actions)
-        latent = torch.cat([latent1, latent2], dim=-1)
-        curr_q1, curr_q2 = self.critic(latent[:, -2], actions[:, -2])
+        return latent_loss, reconst_errors, reward_reconst_errors
 
-        # target Q
+    def calc_critic_loss(self, latents, actions, trajectories, rewards, dones):
+        # Q(z(t), a(t))
+        curr_q1, curr_q2 = self.critic(latents[:, -2], actions[:, -1])
+
+        # Q(z(t+1), a(t+1))
         with torch.no_grad():
-            next_exps = self.to_batch(next_states, actions)
-            next_actions, next_entropies, _ = self.policy.sample(next_exps)
-            next_q1, next_q2 = self.critic_target(latent[:, -1], next_actions)
+            next_actions, next_entropies, _ = self.policy.sample(trajectories)
+            next_q1, next_q2 = self.critic_target(latents[:, -1], next_actions)
             next_q = torch.min(next_q1, next_q2) + self.alpha * next_entropies
 
-        target_q = rewards + (1.0 - dones) * self.gamma_n * next_q
+        target_q =\
+            rewards[:, -1] + (1.0 - dones[:, -1]) * self.gamma_n * next_q
 
+        # Critic losses are mean squared TD errors.
         q1_loss = torch.mean((curr_q1 - target_q).pow(2))
         q2_loss = torch.mean((curr_q2 - target_q).pow(2))
+
         return q1_loss, q2_loss
 
-    def calc_policy_loss(self, states, actions, rewards, next_states,
-                         dones):
-        # re-sample actions to calculate expectations of Q.
-        exps = self.to_batch(states, actions)
-        sampled_action, entropy, _ = self.policy.sample(exps)
+    def calc_policy_loss(self, latents, trajectories):
+        # Re-sample actions to calculate expectations of Q.
+        sampled_action, entropy, _ = self.policy.sample(trajectories)
 
-        # expectations of Q with clipped double Q technique
-        (latent1, latent2), _ =\
-            self.latent.sample_posterior(states, actions)
-        latent = torch.cat([latent1, latent2], dim=-1)
-        q1, q2 = self.critic(latent[:, -1], sampled_action)
+        # Q(z(t+1), a(t+1))
+        q1, q2 = self.critic(latents[:, -1], sampled_action)
         q = torch.min(q1, q2)
 
-        # Policy objective is maximization of (Q + alpha * entropy) with
-        # priority weights.
+        # Policy objective is maximization of (Q + alpha * entropy).
         policy_loss = torch.mean((- q - self.alpha * entropy))
 
         return policy_loss, entropy
@@ -302,3 +330,14 @@ class SlacAgent:
         entropy_loss = -torch.mean(
             self.log_alpha * (self.target_entropy - entropy).detach())
         return entropy_loss
+
+    def save_models(self):
+        self.latent.save(os.path.join(self.model_dir, 'latent.pth'))
+        self.policy.save(os.path.join(self.model_dir, 'policy.pth'))
+        self.critic.save(os.path.join(self.model_dir, 'critic.pth'))
+        self.critic_target.save(
+            os.path.join(self.model_dir, 'critic_target.pth'))
+
+    def __del__(self):
+        self.writer.close()
+        self.env.close()

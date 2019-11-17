@@ -14,7 +14,7 @@ class GaussianPolicy(BaseNetwork):
                  initializer='xavier'):
         super(GaussianPolicy, self).__init__()
 
-        # Conv layers are shared with Encoder.
+        # NOTE: Conv layers are shared with Encoder.
         self.net = create_linear_network(
             input_dim, output_dim*2, hidden_units=hidden_units,
             initializer=initializer)
