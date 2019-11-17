@@ -34,13 +34,8 @@ class SlacAgent:
         self.device = torch.device(
             "cuda" if cuda and torch.cuda.is_available() else "cpu")
 
-        if env_type == 'dm_control':
-            self.action_shape = self.env.action_spec().shape
-            self.observation_shape =\
-                self.env.observation_spec()['pixels'].shape
-        elif env_type == 'gym':
-            self.action_shape = self.env.action_space.shape
-            self.observation_shape = self.env.observation_space['pixels'].shape
+        self.action_shape = self.env.action_space.shape
+        self.observation_shape = self.env.observation_space.shape
 
         self.latent = LatentNetwork(
             self.observation_shape, self.action_shape, feature_dim,

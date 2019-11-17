@@ -51,7 +51,7 @@ def run():
     if args.env_type == 'dm_control':
         env = suite.load(
             domain_name=args.domain_name, task_name=args.task_name)
-        env = PixelObservationsDmControlWrapper(env, 4)
+        env = PixelObservationsDmControlWrapper(env, configs['action_repeat'])
         dir_name = f'{args.domain_name}-{args.task_name}'
     else:
         env = gym.make(args.env_id)

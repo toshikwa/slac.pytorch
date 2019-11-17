@@ -30,41 +30,39 @@ class RenderGymWrapper(Wrapper):
 class PixelObservationsGymWrapper(Wrapper):
     keys = ['state', 'pixels']
 
-    def __init__(self, env, render_kwargs=None):
+    def __init__(self, env, obs_type='pixels', render_kwargs=None):
         super(PixelObservationsGymWrapper, self).__init__(env)
+        assert obs_type in self.keys
+
         self._render_kwargs = dict(
             width=64,
             height=64,
             depth=False,
             camera_name='track',
         )
+
         if render_kwargs is not None:
             self._render_kwargs.update(render_kwargs)
 
-        observation_spaces = collections.OrderedDict()
-        for observation_name in self.keys:
-            if observation_name == 'state':
-                observation_spaces['state'] = self.env.observation_space
-            elif observation_name == 'pixels':
-                image_shape = (
-                    self._render_kwargs['height'],
-                    self._render_kwargs['width'], 3)
-                image_space = spaces.Box(
-                    0, 255, shape=image_shape, dtype=np.uint8)
-                observation_spaces['pixels'] = image_space
+        if obs_type == 'state':
+            self.observation_space = self.env.observation_space
+        elif obs_type == 'pixels':
+            image_shape = (
+                3, self._render_kwargs['height'], self._render_kwargs['width'])
+            image_space = spaces.Box(
+                0, 255, shape=image_shape, dtype=np.uint8)
+            self.observation_space = image_space
 
-        self.observation_space = spaces.Dict(observation_spaces)
+        self.obe_type = obs_type
 
     def _modify_observation(self, observation):
-        observations = collections.OrderedDict()
-        for observation_name in self.keys:
-            if observation_name == 'state':
-                observations['state'] = observation
-            elif observation_name == 'pixels':
-                image = self.env.sim.render(**self._render_kwargs)[::-1, :, :]
-                observations['pixels'] = image
+        if self.obe_type == 'state':
+            obs = observation
+        elif self.obe_type == 'pixels':
+            image = self.env.sim.render(**self._render_kwargs)[::-1, :, :]
+            obs = np.transpose(image, (2, 0, 1))
 
-        return observations
+        return obs
 
     def step(self, action):
         observation, reward, done, info = self.env.step(action)

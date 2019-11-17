@@ -1,0 +1,7 @@
+numpy
+torch
+gym
+tensorboard
+git+https://github.com/ku2482/rltorch
+git+git://github.com/tensorflow/agents.git
+git+git://github.com/deepmind/dm_control.git
