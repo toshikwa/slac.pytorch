@@ -24,8 +24,8 @@ class SlacAgent:
                  eval_interval=50000, cuda=True, seed=0):
 
         self.env = env
-        self.action_shape = self.env.action_space.shape
         self.observation_shape = self.env.observation_space.shape
+        self.action_shape = self.env.action_space.shape
 
         torch.manual_seed(seed)
         np.random.seed(seed)
@@ -76,7 +76,8 @@ class SlacAgent:
             self.alpha = torch.tensor(ent_coef).to(self.device)
 
         self.memory = Memory(
-            memory_size, num_sequences, self.action_shape, self.device)
+            memory_size, num_sequences, self.observation_shape,
+            self.action_shape, self.device)
 
         self.log_dir = log_dir
         self.model_dir = os.path.join(log_dir, 'model')

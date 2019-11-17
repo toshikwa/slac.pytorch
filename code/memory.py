@@ -70,10 +70,12 @@ class SequenceBuff:
 class Memory(dict):
     keys = ['state', 'action', 'reward', 'done']
 
-    def __init__(self, capacity, num_sequences, action_shape, device):
+    def __init__(self, capacity, num_sequences, observation_shape,
+                 action_shape, device):
         super(Memory, self).__init__()
         self.capacity = int(capacity)
         self.num_sequences = int(num_sequences)
+        self.observation_shape = observation_shape
         self.action_shape = action_shape
         self.device = device
         self.reset()
@@ -115,7 +117,8 @@ class Memory(dict):
         indices = np.random.randint(low=0, high=self._n, size=batch_size)
 
         states = np.empty((
-            batch_size, self.num_sequences, 3, 64, 64), dtype=np.float32)
+            batch_size, self.num_sequences, *self.observation_shape),
+            dtype=np.float32)
         actions = np.empty((
             batch_size, self.num_sequences-1, *self.action_shape),
             dtype=np.float32)
