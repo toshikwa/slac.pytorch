@@ -120,9 +120,18 @@ class SlacAgent:
         return len(self.memory) > self.batch_size and\
             self.steps >= self.start_steps * self.action_repeat
 
-    def is_policy(self, state_deque):
-        return self.start_steps > self.steps * self.action_repeat and\
-            len(state_deque) == state_deque.maxlen
+    def reset_deque(self, state):
+        state_deque = deque(maxlen=self.num_sequences)
+        action_deque = deque(maxlen=self.num_sequences-1)
+
+        for _ in range(self.num_sequences-1):
+            state_deque.append(
+                np.zeros(self.observation_shape, dtype=np.uint8))
+            action_deque.append(
+                np.zeros(self.action_shape, dtype=np.uint8))
+        state_deque.append(state)
+
+        return state_deque, action_deque
 
     def deque_to_batch(self, state_deque, action_deque):
         # feature: (1, 256*S)
@@ -160,16 +169,14 @@ class SlacAgent:
         done = False
         state = self.env.reset()
         self.memory.set_initial_state(state)
-
-        state_deque = deque(maxlen=self.num_sequences)
-        action_deque = deque(maxlen=self.num_sequences-1)
-        state_deque.append(state)
+        state_deque, action_deque = self.reset_deque(state)
 
         while not done:
-            if self.is_policy(state_deque):
-                action = self.explore(state_deque, action_deque)
-            else:
+            if self.steps >= self.start_steps * self.action_repeat:
                 action = 2 * np.random.rand(*self.action_shape) - 1
+            else:
+                action = self.explore(state_deque, action_deque)
+
             next_state, reward, done, _ = self.env.step(action)
             self.steps += self.action_repeat
             episode_steps += self.action_repeat
@@ -392,16 +399,10 @@ class SlacAgent:
             state = self.env.reset()
             episode_reward = 0.
             done = False
-
-            state_deque = deque(maxlen=self.num_sequences)
-            action_deque = deque(maxlen=self.num_sequences-1)
-            state_deque.append(state)
+            state_deque, action_deque = self.reset_deque(state)
 
             while not done:
-                if self.is_policy(state_deque):
-                    action = self.explore(state_deque, action_deque)
-                else:
-                    action = 2 * np.random.rand(*self.action_shape) - 1
+                action = self.explore(state_deque, action_deque)
                 next_state, reward, done, _ = self.env.step(action)
                 episode_reward += reward
                 state_deque.append(next_state)
