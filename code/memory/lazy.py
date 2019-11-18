@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 
-class ScaledLazyFrames(object):
+class LazyFrames(object):
     def __init__(self, frames, is_image=False):
         self._frames = frames
         self.is_image = is_image
@@ -17,6 +17,30 @@ class ScaledLazyFrames(object):
             return np.stack(
                 np.array(self._frames, dtype=np.float32),
                 axis=0)
+
+    def __array__(self, dtype=None):
+        out = self._force()
+        if dtype is not None:
+            out = out.astype(dtype)
+        return out
+
+    def __len__(self):
+        return len(self._force())
+
+    def __getitem__(self, i):
+        return self._force()[i]
+
+
+class Frames(object):
+    def __init__(self, frames, is_image=False):
+        self._frames = frames
+        self.is_image = is_image
+
+    def _force(self):
+        if self.is_image:
+            return np.array(self._frames, dtype=np.float32) / 255.0
+        else:
+            return self._frames
 
     def __array__(self, dtype=None):
         out = self._force()
@@ -56,10 +80,10 @@ class SequenceBuff:
         self.memory['done'].append(np.array([done], dtype=np.float32))
 
     def get(self):
-        state = ScaledLazyFrames(list(self.memory['state']), True)
-        action = ScaledLazyFrames(list(self.memory['action']))
-        reward = ScaledLazyFrames(list(self.memory['reward']))
-        done = ScaledLazyFrames(list(self.memory['done']))
+        state = LazyFrames(list(self.memory['state']), True)
+        action = LazyFrames(list(self.memory['action']))
+        reward = LazyFrames(list(self.memory['reward']))
+        done = LazyFrames(list(self.memory['done']))
 
         return state, action, reward, done
 
@@ -67,7 +91,7 @@ class SequenceBuff:
         return len(self.memory['state'])
 
 
-class Memory(dict):
+class LazyMemory(dict):
     keys = ['state', 'action', 'reward', 'done']
 
     def __init__(self, capacity, num_sequences, observation_shape,
@@ -128,7 +152,7 @@ class Memory(dict):
             batch_size, self.num_sequences-1, 1), dtype=np.float32)
 
         for i, index in enumerate(indices):
-            states[i, ...] = self['state'][index]
+            states[i, ...] = np.array(self['state'][index])
             actions[i, ...] = self['action'][index]
             rewards[i, ...] = self['reward'][index]
             dones[i, ...] = self['done'][index]

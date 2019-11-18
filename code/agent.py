@@ -6,7 +6,7 @@ import torch
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 
-from memory import Memory
+from memory import SequenceMemory
 from network import LatentNetwork, GaussianPolicy, TwinnedQNetwork
 from utils import grad_false, hard_update, soft_update, update_params,\
     RunningMeanStats
@@ -75,7 +75,7 @@ class SlacAgent:
         else:
             self.alpha = torch.tensor(ent_coef).to(self.device)
 
-        self.memory = Memory(
+        self.memory = SequenceMemory(
             memory_size, num_sequences, self.observation_shape,
             self.action_shape, self.device)
 
@@ -158,7 +158,6 @@ class SlacAgent:
         episode_steps = 0
         done = False
         state = self.env.reset()
-        self.memory.set_initial_state(state)
 
         state_deque = deque(maxlen=self.num_sequences)
         action_deque = deque(maxlen=self.num_sequences-1)
@@ -174,7 +173,7 @@ class SlacAgent:
             episode_steps += self.action_repeat
             episode_reward += reward
 
-            self.memory.append(action, reward, next_state, done)
+            self.memory.append(state, action, reward, done)
 
             if self.is_update():
                 for _ in range(self.updates_per_step):
