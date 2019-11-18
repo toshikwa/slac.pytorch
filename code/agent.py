@@ -119,16 +119,16 @@ class SlacAgent:
         return len(self.memory) > self.batch_size and\
             self.steps >= self.start_steps * self.action_repeat
 
-    def is_random(self, state_deque):
-        return self.start_steps > self.steps * self.action_repeat or\
-            len(state_deque) != state_deque.maxlen
+    def is_policy(self, state_deque):
+        return self.start_steps > self.steps * self.action_repeat and\
+            len(state_deque) == state_deque.maxlen
 
     def deque_to_batch(self, state_deque, action_deque):
         # features: (1, 256*S)
         states = (np.stack(state_deque, axis=0)/255.0).astype(np.float32)
         states = torch.FloatTensor(states).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            features = self.latent.encoder(states).view(1, -1).to(self.device)
+            features = self.latent.encoder(states).view(1, -1)
         # actions: (1, |A|*(S-1))
         actions = np.stack(action_deque, axis=0)
         actions = torch.FloatTensor(actions).view(1, -1).to(self.device)
@@ -165,10 +165,10 @@ class SlacAgent:
         state_deque.append(state)
 
         while not done:
-            if self.is_random(state_deque):
-                action = 2 * np.random.rand(*self.action_shape) - 1
-            else:
+            if self.is_policy(state_deque):
                 action = self.explore(state_deque, action_deque)
+            else:
+                action = 2 * np.random.rand(*self.action_shape) - 1
             next_state, reward, done, _ = self.env.step(action)
             self.steps += self.action_repeat
             episode_steps += self.action_repeat
@@ -215,18 +215,20 @@ class SlacAgent:
         # Then, update policy and critic.
         images, actions, rewards, dones =\
             self.memory.sample(self.batch_size)
-        features = self.latent.encoder(images)
 
-        # Sample latent vectors from posterior dynamics.
-        (latents1, latents2), _ =\
-            self.latent.sample_posterior(features, actions)
-        latents = torch.cat([latents1, latents2], dim=-1)
+        # Don't update the latent model when updating policy and critic.
+        with torch.no_grad():
+            # Sample latent vectors from posterior dynamics.
+            features = self.latent.encoder(images)
+            (latents1, latents2), _ =\
+                self.latent.sample_posterior(features, actions)
+            latents = torch.cat([latents1, latents2], dim=-1)
 
-        num_batches = features.size(0)
-        feature_sequences = features.view(num_batches, -1)
-        action_sequences = actions.view(num_batches, -1)
-        trajectories = torch.cat(
-            [feature_sequences, action_sequences], dim=-1)
+            num_batches = features.size(0)
+            feature_sequences = features.view(num_batches, -1)
+            action_sequences = actions.view(num_batches, -1)
+            trajectories = torch.cat(
+                [feature_sequences, action_sequences], dim=-1)
 
         q1_loss, q2_loss = self.calc_critic_loss(
             latents, actions, trajectories, rewards, dones)
@@ -275,11 +277,20 @@ class SlacAgent:
             self.writer.add_scalar(
                 'stats/reward_reconst_errors', reward_reconst_errors,
                 self.learning_steps)
+
+            # (N, C, H, W)
+            _images = images[:8, 0, ...].cpu()
+            _reconst_images = reconst_images[:8, 0, ...].cpu()
+            write_images = torch.cat([_images, _reconst_images], dim=-2)
             self.writer.add_images(
-                'images/ground_truth', images[:8, 0, ...],
+                'images/t=1/top_truth_bottom_reconst', write_images,
                 self.learning_steps)
+
+            _images = images[:8, -1, ...].cpu()
+            _reconst_images = reconst_images[:8, -1, ...].cpu()
+            write_images = torch.cat([_images, _reconst_images], dim=-2)
             self.writer.add_images(
-                'images/reconst', reconst_images[:8, 0, ...],
+                'images/t=tau/top_truth_bottom_reconst', write_images,
                 self.learning_steps)
 
     def calc_latent_loss(self, images, features, actions, rewards, dones):
@@ -342,16 +353,14 @@ class SlacAgent:
             state_deque.append(state)
 
             while not done:
-                if self.is_random(state_deque):
-                    action = 2 * np.random.rand(*self.action_shape) - 1
+                if self.is_policy(state_deque):
+                    action = self.explore(state_deque, action_deque)
                 else:
-                    action = self.exploit(state_deque, action_deque)
+                    action = 2 * np.random.rand(*self.action_shape) - 1
                 next_state, reward, done, _ = self.env.step(action)
                 episode_reward += reward
                 state_deque.append(next_state)
                 action_deque.append(action)
-
-                state = next_state
 
             returns[i] = episode_reward
 

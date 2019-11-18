@@ -208,13 +208,14 @@ class LatentNetwork(BaseNetwork):
         if self.kl_analytic:
             for i in range(num_sequences):
                 kld += torch.mean(kl_divergence(
-                    latent1_post_dists[i], latent1_pri_dists[i]))
+                    latent1_post_dists[i], latent1_pri_dists[i]),
+                    dim=0).sum()
         else:
             for i in range(num_sequences):
                 kld += torch.mean(
                     latent1_post_dists[i].log_prob(latent1_post_samples[:, i])
-                    - latent1_pri_dists[i].log_prob(latent1_post_samples[:, i])
-                    )
+                    - latent1_pri_dists[i].log_prob(latent1_post_samples[:, i]),
+                    dim=0).sum()
 
         # NOTE: We use the same distribution for prior and posterior of z2,
         # whose KL diverhence are 0.
@@ -223,7 +224,7 @@ class LatentNetwork(BaseNetwork):
         image_dists = self.decoder(
             [latent1_post_samples, latent2_post_samples])
         # log likelihood of x(t).
-        log_likelihoods = image_dists.log_prob(images).sum(dim=1).mean()
+        log_likelihoods = image_dists.log_prob(images).mean(dim=0).sum()
 
         # Reconstruction errors for debugging.
         reconst_errors = (images-image_dists.loc).pow(2).mean(
@@ -237,7 +238,7 @@ class LatentNetwork(BaseNetwork):
             latent2_post_samples[:, 1:num_sequences]])
         # Log likelihood of r(t) with masking where done = True.
         reward_log_likelihood = reward_dists.log_prob(rewards) * (1.0-dones)
-        reward_log_likelihood = reward_log_likelihood.sum(dim=1).mean()
+        reward_log_likelihood = reward_log_likelihood.mean(dim=0).sum()
 
         # Reconstruction errors for debugging.
         reward_reconst_errors = (rewards-reward_dists.loc).pow(2) * (1.0-dones)
@@ -246,7 +247,8 @@ class LatentNetwork(BaseNetwork):
 
         loss = kld - log_likelihoods - reward_log_likelihood
 
-        return loss, reconst_errors, reward_reconst_errors, image_dists.loc
+        return loss, reconst_errors, reward_reconst_errors,\
+            image_dists.loc.detach()
 
     def sample_prior(self, actions):
         ''' Sample from prior dynamics.
