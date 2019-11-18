@@ -216,13 +216,13 @@ class LatentNetwork(BaseNetwork):
         ''' Sample from posterior dynamics.
         Args:
             features: (N, S, 256) shaped tensor.
-            actions : (N, S-1, |A|) shaped tensor.
+            actions : (N, S-1, *action_space) shaped tensor.
         '''
         num_sequences = actions.size(1) + 1
 
         # (S, N, 256)
         features = torch.transpose(features, 0, 1)
-        # (S-1, N, |A|)
+        # (S-1, N, *action_space)
         actions = torch.transpose(actions, 0, 1)
 
         latent1_samples = []

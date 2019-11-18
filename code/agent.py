@@ -17,10 +17,10 @@ class SlacAgent:
                  batch_size=256, latent_batch_size=32, num_sequences=8,
                  action_repeat=4, lr=0.0003, latent_lr=0.0001, feature_dim=256,
                  latent1_dim=32, latent2_dim=256, hidden_units=[256, 256],
-                 memory_size=1e5, gamma=0.99, tau=0.005, entropy_tuning=True,
-                 ent_coef=0.2, grad_clip=None, updates_per_step=1,
-                 start_steps=10000, training_log_interval=10,
-                 learning_log_interval=100, target_update_interval=1,
+                 memory_size=1e5, gamma=0.99, target_update_interval=1,
+                 tau=0.005, entropy_tuning=True, ent_coef=0.2, leaky_slope=0.2,
+                 grad_clip=None, updates_per_step=1, start_steps=10000,
+                 training_log_interval=10, learning_log_interval=100,
                  eval_interval=50000, cuda=True, seed=0):
 
         self.env = env
@@ -38,7 +38,8 @@ class SlacAgent:
 
         self.latent = LatentNetwork(
             self.observation_shape, self.action_shape, feature_dim,
-            latent1_dim, latent2_dim).to(self.device)
+            latent1_dim, latent2_dim, hidden_units, leaky_slope
+            ).to(self.device)
 
         self.policy = GaussianPolicy(
             num_sequences * feature_dim
@@ -180,9 +181,9 @@ class SlacAgent:
                 for _ in range(self.updates_per_step):
                     self.learn()
 
-            if self.steps % self.eval_interval == 0:
-                self.evaluate()
-                self.save_models()
+                if self.steps % self.eval_interval == 0:
+                    self.evaluate()
+                    self.save_models()
 
             state_deque.append(next_state)
             action_deque.append(action)
@@ -419,6 +420,7 @@ class SlacAgent:
         print('-' * 60)
 
     def save_models(self):
+        self.latent.encoder.save(os.path.join(self.model_dir, 'encoder.pth'))
         self.latent.save(os.path.join(self.model_dir, 'latent.pth'))
         self.policy.save(os.path.join(self.model_dir, 'policy.pth'))
         self.critic.save(os.path.join(self.model_dir, 'critic.pth'))

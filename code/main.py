@@ -35,15 +35,16 @@ def run():
         'hidden_units': [256, 256],
         'memory_size': 1e5,
         'gamma': 0.99,
+        'target_update_interval': 1,
         'tau': 0.005,
         'entropy_tuning': True,
         'ent_coef': 0.2,  # It's ignored when entropy_tuning=True.
+        'leaky_slope': 0.2,
         'grad_clip': None,
         'updates_per_step': 1,
         'start_steps': 10000,
         'training_log_interval': 10,
         'learning_log_interval': 100,
-        'target_update_interval': 1,
         'eval_interval': 50000,
         'cuda': args.cuda,
         'seed': args.seed
