@@ -267,20 +267,20 @@ class LatentNetwork(BaseNetwork):
             if t == 0:
                 # p(z1(0)) = N(0, I)
                 latent1_dist = self.latent1_init_prior(actions[t])
-                latent1_sample = latent1_dist.sample()
+                latent1_sample = latent1_dist.rsample()
                 # p(z2(0) | z1(0))
                 latent2_dist = self.latent2_init_prior(latent1_sample)
-                latent2_sample = latent2_dist.sample()
+                latent2_sample = latent2_dist.rsample()
 
             else:
                 # p(z1(t) | z2(t-1), a(t-1))
                 latent1_dist = self.latent1_prior(
                     [latent2_samples[t-1], actions[t-1]])
-                latent1_sample = latent1_dist.sample()
+                latent1_sample = latent1_dist.rsample()
                 # p(z2(t) | z1(t), z2(t-1), a(t-1))
                 latent2_dist = self.latent2_prior(
                     [latent1_sample, latent2_samples[t-1], actions[t-1]])
-                latent2_sample = latent2_dist.sample()
+                latent2_sample = latent2_dist.rsample()
 
             latent1_samples.append(latent1_sample)
             latent2_samples.append(latent2_sample)
@@ -317,19 +317,19 @@ class LatentNetwork(BaseNetwork):
             if t == 0:
                 # q(z1(0) | feat(0))
                 latent1_dist = self.latent1_init_posterior(features[t])
-                latent1_sample = latent1_dist.sample()
+                latent1_sample = latent1_dist.rsample()
                 # q(z2(0) | z1(0))
                 latent2_dist = self.latent2_init_posterior(latent1_sample)
-                latent2_sample = latent2_dist.sample()
+                latent2_sample = latent2_dist.rsample()
             else:
                 # q(z1(t) | feat(t), z2(t-1), a(t-1))
                 latent1_dist = self.latent1_posterior(
                     [features[t], latent2_samples[t-1], actions[t-1]])
-                latent1_sample = latent1_dist.sample()
+                latent1_sample = latent1_dist.rsample()
                 # q(z2(t) | z1(t), z2(t-1), a(t-1))
                 latent2_dist = self.latent2_posterior(
                     [latent1_sample, latent2_samples[t-1], actions[t-1]])
-                latent2_sample = latent2_dist.sample()
+                latent2_sample = latent2_dist.rsample()
 
             latent1_samples.append(latent1_sample)
             latent2_samples.append(latent2_sample)

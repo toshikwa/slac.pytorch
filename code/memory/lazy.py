@@ -96,7 +96,7 @@ class LazyMemory(dict):
 
     def __init__(self, capacity, num_sequences, observation_shape,
                  action_shape, device):
-        super(Memory, self).__init__()
+        super(LazyMemory, self).__init__()
         self.capacity = int(capacity)
         self.num_sequences = int(num_sequences)
         self.observation_shape = observation_shape
