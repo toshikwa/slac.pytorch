@@ -1,15 +1,20 @@
 from collections import deque
 import numpy as np
 import torch
+from torch.distributions.kl import kl_divergence
 
 
-def to_batch(state, action, reward, next_state, done, device):
-    state = torch.FloatTensor(state).unsqueeze(0).to(device)
-    action = torch.FloatTensor([action]).view(1, -1).to(device)
-    reward = torch.FloatTensor([reward]).unsqueeze(0).to(device)
-    next_state = torch.FloatTensor(next_state).unsqueeze(0).to(device)
-    done = torch.FloatTensor([done]).unsqueeze(0).to(device)
-    return state, action, reward, next_state, done
+def calc_kl_divergence(p_list, q_list):
+    assert len(p_list) == len(q_list)
+
+    kld = 0.0
+    for i in range(len(p_list)):
+        # (N, L) shaped array of kl divergences.
+        _kld = kl_divergence(p_list[i], q_list[i])
+        # Average along batches, sum along sequences and elements.
+        kld += _kld.mean(dim=0).sum()
+
+    return kld
 
 
 def update_params(optim, network, loss, grad_clip=None, retain_graph=False):

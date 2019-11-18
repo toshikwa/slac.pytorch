@@ -8,8 +8,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from memory import LazyMemory
 from network import LatentNetwork, GaussianPolicy, TwinnedQNetwork
-from utils import grad_false, hard_update, soft_update, update_params,\
-    RunningMeanStats
+from utils import calc_kl_divergence, grad_false, hard_update, soft_update,\
+    update_params, RunningMeanStats
 
 
 class SlacAgent:
@@ -100,7 +100,7 @@ class SlacAgent:
         self.batch_size = batch_size
         self.latent_batch_size = latent_batch_size
         self.start_steps = start_steps
-        self.gamma_n = gamma
+        self.gamma = gamma
         self.entropy_tuning = entropy_tuning
         self.grad_clip = grad_clip
         self.updates_per_step = updates_per_step
@@ -124,31 +124,31 @@ class SlacAgent:
             len(state_deque) == state_deque.maxlen
 
     def deque_to_batch(self, state_deque, action_deque):
-        # features: (1, 256*S)
-        states = (np.stack(state_deque, axis=0)/255.0).astype(np.float32)
-        states = torch.FloatTensor(states).unsqueeze(0).to(self.device)
+        # feature: (1, 256*S)
+        state = (np.stack(state_deque, axis=0)/255.0).astype(np.float32)
+        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            features = self.latent.encoder(states).view(1, -1)
-        # actions: (1, |A|*(S-1))
-        actions = np.stack(action_deque, axis=0)
-        actions = torch.FloatTensor(actions).view(1, -1).to(self.device)
-        # trajectories: (1, 256*S + |A|*(S-1))
-        trajectories = torch.cat([features, actions], dim=-1)
+            feature = self.latent.encoder(state).view(1, -1)
+        # action: (1, |A|*(S-1))
+        action = np.stack(action_deque, axis=0)
+        action = torch.FloatTensor(action).view(1, -1).to(self.device)
+        # trajectory: (1, 256*S + |A|*(S-1))
+        trajectory = torch.cat([feature, action], dim=-1)
 
-        return trajectories
+        return trajectory
 
     def explore(self, state_deque, action_deque):
         # act with randomness
-        trajectories = self.deque_to_batch(state_deque, action_deque)
+        trajectory = self.deque_to_batch(state_deque, action_deque)
         with torch.no_grad():
-            action, _, _ = self.policy.sample(trajectories)
+            action, _, _ = self.policy.sample(trajectory)
         return action.cpu().numpy().reshape(-1)
 
     def exploit(self, state_deque, action_deque):
         # act without randomness
-        experiences = self.deque_to_batch(state_deque, action_deque)
+        trajectory = self.deque_to_batch(state_deque, action_deque)
         with torch.no_grad():
-            _, _, action = self.policy.sample(experiences)
+            _, _, action = self.policy.sample(trajectory)
         return action.cpu().numpy().reshape(-1)
 
     def train_episode(self):
@@ -209,8 +209,8 @@ class SlacAgent:
         images, actions, rewards, dones =\
             self.memory.sample(self.latent_batch_size)
         features = self.latent.encoder(images)
-        latent_loss, reconst_errors, reward_reconst_errors, reconst_images =\
-            self.calc_latent_loss(images, features, actions, rewards, dones)
+        latent_loss = self.calc_latent_loss(
+            images, features, actions, rewards, dones)
 
         # Then, update policy and critic.
         images, actions, rewards, dones =\
@@ -272,33 +272,69 @@ class SlacAgent:
             self.writer.add_scalar(
                 'stats/entropy', entropies.detach().mean().item(),
                 self.learning_steps)
-            self.writer.add_scalar(
-                'stats/reconst_errors', reconst_errors, self.learning_steps)
-            self.writer.add_scalar(
-                'stats/reward_reconst_errors', reward_reconst_errors,
-                self.learning_steps)
-
-            # (N, C, H, W)
-            _images = images[:8, 0, ...].cpu()
-            _reconst_images = reconst_images[:8, 0, ...].cpu()
-            write_images = torch.cat([_images, _reconst_images], dim=-2)
-            self.writer.add_images(
-                'images/t=1/top_truth_bottom_reconst', write_images,
-                self.learning_steps)
-
-            _images = images[:8, -1, ...].cpu()
-            _reconst_images = reconst_images[:8, -1, ...].cpu()
-            write_images = torch.cat([_images, _reconst_images], dim=-2)
-            self.writer.add_images(
-                'images/t=tau/top_truth_bottom_reconst', write_images,
-                self.learning_steps)
 
     def calc_latent_loss(self, images, features, actions, rewards, dones):
-        latent_loss, reconst_errors, reward_reconst_errors, reconst_images =\
-            self.latent.calc_loss(images, features, actions, rewards, dones)
+        num_sequences = actions.size(1) + 1
 
-        return latent_loss, reconst_errors, reward_reconst_errors,\
-            reconst_images
+        # Sample from posterior dynamics. (N, S, L*) samples, (S, N, L*) dists.
+        (latent1_post_samples, latent2_post_samples),\
+            (latent1_post_dists, latent2_post_dists) =\
+            self.latent.sample_posterior(features, actions)
+
+        # Sample from prior dynamics. (N, S, L*) samples, (S, N, L*) dists.
+        (latent1_pri_samples, latent2_pri_samples),\
+            (latent1_pri_dists, latent2_pri_dists) =\
+            self.latent.sample_prior(actions)
+
+        # Calculate KL divergence between priors and posteriors of z1.
+        kld_loss = calc_kl_divergence(latent1_post_dists, latent1_pri_dists)
+
+        # Genarated observations: p(x(t) | z1(t), z2(t)).
+        image_dists = self.latent.decoder(
+            [latent1_post_samples, latent2_post_samples])
+        # Log likelihood of x(t).
+        log_likelihood_loss = image_dists.log_prob(images).mean(dim=0).sum()
+
+        # Genarated rewards: p(r(t) | z1(t), z2(t), a(t), z1(t+1), z2(t+1))
+        reward_dists = self.latent.reward_predictor([
+            latent1_post_samples[:, :num_sequences-1],
+            latent2_post_samples[:, :num_sequences-1],
+            actions, latent1_post_samples[:, 1:num_sequences],
+            latent2_post_samples[:, 1:num_sequences]])
+        # Log likelihood of r(t) with masking where done = True.
+        reward_log_likelihoods = reward_dists.log_prob(rewards) * (1.0-dones)
+        reward_log_likelihood_loss = reward_log_likelihoods.mean(dim=0).sum()
+
+        latent_loss =\
+            kld_loss - log_likelihood_loss - reward_log_likelihood_loss
+
+        if self.learning_steps % self.learning_log_interval == 0:
+            images = images[:8, ...].detach().cpu()
+            reconst_images = image_dists.loc[:8, ...].detach().cpu()
+
+            t1_images = torch.cat(
+                [images[:, 0], reconst_images[:, 0]], dim=-2)
+            tlast_images = torch.cat(
+                [images[:, -1], reconst_images[:, -1]], dim=-2)
+            self.writer.add_images(
+                'images/t=1/top_truth_bottom_reconst', t1_images,
+                self.learning_steps)
+            self.writer.add_images(
+                'images/t=tau/top_truth_bottom_reconst', tlast_images,
+                self.learning_steps)
+
+            reconst_error = (
+                images-reconst_images).pow(2).mean(dim=(0, 1)).sum().item()
+            reward_reconst_error = ((
+                rewards-reward_dists.loc).pow(2) * (1.0-dones)
+                ).mean(dim=(0, 1)).sum().detach().item()
+            self.writer.add_scalar(
+                'stats/reconst_error', reconst_error, self.learning_steps)
+            self.writer.add_scalar(
+                'stats/reward_reconst_error', reward_reconst_error,
+                self.learning_steps)
+
+        return latent_loss
 
     def calc_critic_loss(self, latents, actions, trajectories, rewards, dones):
         # Q(z(t), a(t))
@@ -311,32 +347,40 @@ class SlacAgent:
             next_q = torch.min(next_q1, next_q2) + self.alpha * next_entropies
 
         target_q =\
-            rewards[:, -1] + (1.0 - dones[:, -1]) * self.gamma_n * next_q
+            rewards[:, -1] + (1.0 - dones[:, -1]) * self.gamma * next_q
 
         # Critic losses are mean squared TD errors.
         q1_loss = torch.mean((curr_q1 - target_q).pow(2))
         q2_loss = torch.mean((curr_q2 - target_q).pow(2))
 
+        if self.learning_steps % self.learning_log_interval == 0:
+            mean_q1 = curr_q1.detach().mean().item()
+            mean_q2 = curr_q2.detach().mean().item()
+            self.writer.add_scalar(
+                'stats/mean_Q1', mean_q1, self.learning_steps)
+            self.writer.add_scalar(
+                'stats/mean_Q2', mean_q2, self.learning_steps)
+
         return q1_loss, q2_loss
 
     def calc_policy_loss(self, latents, trajectories):
         # Re-sample actions to calculate expectations of Q.
-        sampled_action, entropy, _ = self.policy.sample(trajectories)
+        sampled_actions, entropies, _ = self.policy.sample(trajectories)
 
         # Q(z(t+1), a(t+1))
-        q1, q2 = self.critic(latents[:, -1], sampled_action)
+        q1, q2 = self.critic(latents[:, -1], sampled_actions)
         q = torch.min(q1, q2)
 
         # Policy objective is maximization of (Q + alpha * entropy).
-        policy_loss = torch.mean((- q - self.alpha * entropy))
+        policy_loss = torch.mean((- q - self.alpha * entropies))
 
-        return policy_loss, entropy
+        return policy_loss, entropies
 
-    def calc_entropy_loss(self, entropy):
+    def calc_entropy_loss(self, entropies):
         # Intuitively, we increse alpha when entropy is less than target
         # entropy, vice versa.
         entropy_loss = -torch.mean(
-            self.log_alpha * (self.target_entropy - entropy).detach())
+            self.log_alpha * (self.target_entropy - entropies).detach())
         return entropy_loss
 
     def evaluate(self):

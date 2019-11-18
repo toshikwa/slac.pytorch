@@ -4,6 +4,8 @@ import torch
 
 
 class LazyFrames(object):
+    ''' LazyFrames memory-efficiently stores stacked data. '''
+
     def __init__(self, frames, is_image=False):
         self._frames = frames
         self.is_image = is_image
@@ -17,30 +19,6 @@ class LazyFrames(object):
             return np.stack(
                 np.array(self._frames, dtype=np.float32),
                 axis=0)
-
-    def __array__(self, dtype=None):
-        out = self._force()
-        if dtype is not None:
-            out = out.astype(dtype)
-        return out
-
-    def __len__(self):
-        return len(self._force())
-
-    def __getitem__(self, i):
-        return self._force()[i]
-
-
-class Frames(object):
-    def __init__(self, frames, is_image=False):
-        self._frames = frames
-        self.is_image = is_image
-
-    def _force(self):
-        if self.is_image:
-            return np.array(self._frames, dtype=np.float32) / 255.0
-        else:
-            return self._frames
 
     def __array__(self, dtype=None):
         out = self._force()
@@ -80,6 +58,13 @@ class SequenceBuff:
         self.memory['done'].append(np.array([done], dtype=np.float32))
 
     def get(self):
+        '''
+        Returns:
+            state : (S, *observation_shape) shaped array.
+            action: (S-1, *action_shape) shaped array.
+            reward: (S-1, 1) shaped array.
+            done  : (S-1, 1) shaped array.
+        '''
         state = LazyFrames(list(self.memory['state']), True)
         action = LazyFrames(list(self.memory['action']))
         reward = LazyFrames(list(self.memory['reward']))

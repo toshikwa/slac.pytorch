@@ -23,21 +23,21 @@ class GaussianPolicy(BaseNetwork):
         if isinstance(x, list):
             x = torch.cat(x,  dim=-1)
 
-        mean, log_std = torch.chunk(self.net(x), 2, dim=-1)
-        log_std = torch.clamp(
-            log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
+        means, log_stds = torch.chunk(self.net(x), 2, dim=-1)
+        log_stds = torch.clamp(
+            log_stds, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
 
-        return mean, log_std
+        return means, log_stds
 
     def sample(self, x):
-        # calculate Gaussian distribusion of (mean, std)
+        # Calculate Gaussian distribusion of (means, stds).
         means, log_stds = self.forward(x)
         stds = log_stds.exp()
         normals = Normal(means, stds)
-        # sample actions
+        # Sample actions.
         xs = normals.rsample()
         actions = torch.tanh(xs)
-        # calculate entropies
+        # Calculate entropies.
         log_probs = normals.log_prob(xs)\
             - torch.log(1 - actions.pow(2) + self.eps)
         entropies = -log_probs.sum(dim=1, keepdim=True)
