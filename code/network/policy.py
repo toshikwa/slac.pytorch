@@ -1,8 +1,9 @@
 import torch
+from torch import nn
 from torch.distributions import Normal
-from rltorch.network import create_linear_network
 
-from network.base import BaseNetwork
+from network.base import BaseNetwork, create_linear_network,\
+    weights_init_xavier
 
 
 class GaussianPolicy(BaseNetwork):
@@ -11,13 +12,13 @@ class GaussianPolicy(BaseNetwork):
     eps = 1e-6
 
     def __init__(self, input_dim, output_dim, hidden_units=[256, 256],
-                 initializer='xavier'):
+                 initializer=weights_init_xavier):
         super(GaussianPolicy, self).__init__()
 
         # NOTE: Conv layers are shared with Encoder.
         self.net = create_linear_network(
             input_dim, output_dim*2, hidden_units=hidden_units,
-            initializer=initializer)
+            hidden_activation=nn.ReLU(), initializer=initializer)
 
     def forward(self, x):
         if isinstance(x, list):

@@ -22,3 +22,20 @@ class BaseNetwork(nn.Module):
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
+
+
+def create_linear_network(input_dim, output_dim, hidden_units=[256, 256],
+                          hidden_activation=nn.ReLU(), output_activation=None,
+                          initializer=weights_init_xavier):
+    model = []
+    units = input_dim
+    for next_units in hidden_units:
+        model.append(nn.Linear(units, next_units))
+        model.append(hidden_activation)
+        units = next_units
+
+    model.append(nn.Linear(units, output_dim))
+    if output_activation is not None:
+        model.append(output_activation)
+
+    return nn.Sequential(*model).apply(initializer)

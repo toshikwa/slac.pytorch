@@ -4,21 +4,21 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.distributions import Normal
 
-from network.base import BaseNetwork, weights_init_xavier
+from network.base import BaseNetwork, create_linear_network,\
+    weights_init_xavier
 
 
 class Gaussian(BaseNetwork):
 
-    def __init__(self, input_dim, hidden_dim, output_dim, std=None,
-                 alpha=0.2):
+    def __init__(self, input_dim, output_dim, hidden_units=[256, 256],
+                 std=None, leaky_slope=0.2):
         super(Gaussian, self).__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.LeakyReLU(negative_slope=alpha),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(negative_slope=alpha),
-            nn.Linear(hidden_dim, 2*output_dim if std is None else output_dim)
-        ).apply(weights_init_xavier)
+        self.net = create_linear_network(
+            input_dim, 2*output_dim if std is None else output_dim,
+            hidden_units=hidden_units,
+            hidden_activation=nn.LeakyReLU(leaky_slope),
+            initializer=weights_init_xavier)
+
         self.std = std
 
     def forward(self, x):
@@ -51,26 +51,26 @@ class ConstantGaussian(BaseNetwork):
 
 class Decoder(BaseNetwork):
 
-    def __init__(self, input_dim=288, output_dim=3, std=1.0, alpha=0.2):
+    def __init__(self, input_dim=288, output_dim=3, std=1.0, leaky_slope=0.2):
         super(Decoder, self).__init__()
         self.std = std
 
         self.net = nn.Sequential(
             # (32+256, 1, 1) -> (256, 4, 4)
             nn.ConvTranspose2d(input_dim, 256, 4),
-            nn.LeakyReLU(negative_slope=alpha),
+            nn.LeakyReLU(leaky_slope),
             # (256, 4, 4) -> (128, 8, 8)
             nn.ConvTranspose2d(256, 128, 3, 2, 1, 1),
-            nn.LeakyReLU(negative_slope=alpha),
+            nn.LeakyReLU(leaky_slope),
             # (128, 8, 8) -> (64, 16, 16)
             nn.ConvTranspose2d(128, 64, 3, 2, 1, 1),
-            nn.LeakyReLU(negative_slope=alpha),
+            nn.LeakyReLU(leaky_slope),
             # (64, 16, 16) -> (32, 32, 32)
             nn.ConvTranspose2d(64, 32, 3, 2, 1, 1),
-            nn.LeakyReLU(negative_slope=alpha),
+            nn.LeakyReLU(leaky_slope),
             # (32, 32, 32) -> (3, 64, 64)
             nn.ConvTranspose2d(32, 3, 5, 2, 2, 1),
-            nn.LeakyReLU(negative_slope=alpha)
+            nn.LeakyReLU(leaky_slope)
         ).apply(weights_init_xavier)
 
     def forward(self, x):
@@ -87,25 +87,25 @@ class Decoder(BaseNetwork):
 
 class Encoder(BaseNetwork):
 
-    def __init__(self, input_dim=3, output_dim=256):
+    def __init__(self, input_dim=3, output_dim=256, leaky_slope=0.2):
         super(Encoder, self).__init__()
 
         self.net = nn.Sequential(
             # (3, 64, 64) -> (32, 32, 32)
             nn.Conv2d(input_dim, 32, 5, 2, 2),
-            nn.LeakyReLU(),
+            nn.LeakyReLU(leaky_slope),
             # (32, 32, 32) -> (64, 16, 16)
             nn.Conv2d(32, 64, 3, 2, 1),
-            nn.LeakyReLU(),
+            nn.LeakyReLU(leaky_slope),
             # (64, 16, 16) -> (128, 8, 8)
             nn.Conv2d(64, 128, 3, 2, 1),
-            nn.LeakyReLU(),
+            nn.LeakyReLU(leaky_slope),
             # (128, 8, 8) -> (256, 4, 4)
             nn.Conv2d(128, 256, 3, 2, 1),
-            nn.LeakyReLU(),
+            nn.LeakyReLU(leaky_slope),
             # (256, 4, 4) -> (256, 1, 1)
             nn.Conv2d(256, output_dim, 4),
-            nn.LeakyReLU()
+            nn.LeakyReLU(leaky_slope)
         ).apply(weights_init_xavier)
 
     def forward(self, x):
@@ -120,53 +120,50 @@ class Encoder(BaseNetwork):
 class LatentNetwork(BaseNetwork):
 
     def __init__(self, observation_shape, action_shape, feature_dim=256,
-                 latent1_dim=32, latent2_dim=256, hidden_dim=256):
+                 latent1_dim=32, latent2_dim=256, hidden_units=[256, 256],
+                 leaky_slope=0.2):
         super(LatentNetwork, self).__init__()
         # NOTE: We encode x as the feature vector to share convolutional
         # part of the network with the policy.
-
-        self.observation_shape = observation_shape
-        self.action_shape = action_shape
-        self.feature_dim = feature_dim
-        self.latent1_dim = latent1_dim
-        self.latent2_dim = latent2_dim
-        self.hidden_dim = hidden_dim
 
         # p(z1(0)) = N(0, I)
         self.latent1_init_prior = ConstantGaussian(latent1_dim)
         # p(z2(0) | z1(0))
         self.latent2_init_prior = Gaussian(
-            latent1_dim, hidden_dim, latent2_dim)
+            latent1_dim, latent2_dim, hidden_units, leaky_slope=leaky_slope)
         # p(z1(t+1) | z2(t), a(t))
         self.latent1_prior = Gaussian(
-            latent2_dim + action_shape[0], hidden_dim, latent1_dim)
+            latent2_dim + action_shape[0], latent1_dim, hidden_units,
+            leaky_slope=leaky_slope)
         # p(z2(t+1) | z1(t+1), z2(t), a(t))
         self.latent2_prior = Gaussian(
-            latent1_dim + latent2_dim + action_shape[0], hidden_dim,
-            latent2_dim)
+            latent1_dim + latent2_dim + action_shape[0], latent2_dim,
+            hidden_units, leaky_slope=leaky_slope)
 
         # q(z1(0) | feat(0))
         self.latent1_init_posterior = Gaussian(
-            feature_dim, hidden_dim, latent1_dim)
+            feature_dim, latent1_dim, hidden_units, leaky_slope=leaky_slope)
         # q(z2(0) | z1(0)) = p(z2(0) | z1(0))
         self.latent2_init_posterior = self.latent2_init_prior
         # q(z1(t+1) | feat(t+1), z2(t), a(t))
         self.latent1_posterior = Gaussian(
-            feature_dim + latent2_dim + action_shape[0], hidden_dim,
-            latent1_dim)
+            feature_dim + latent2_dim + action_shape[0], latent1_dim,
+            hidden_units, leaky_slope=leaky_slope)
         # q(z2(t+1) | z1(t+1), z2(t), a(t)) = p(z2(t+1) | z1(t+1), z2(t), a(t))
         self.latent2_posterior = self.latent2_prior
 
         # p(r(t) | z1(t), z2(t), a(t), z1(t+1), z2(t+1))
         self.reward_predictor = Gaussian(
-            2 * latent1_dim + 2 * latent2_dim + action_shape[0], hidden_dim, 1)
+            2 * latent1_dim + 2 * latent2_dim + action_shape[0],
+            1, hidden_units, leaky_slope=leaky_slope)
 
         # feat(t) = x(t) : This encoding is performed deterministically.
-        self.encoder = Encoder(observation_shape[0], feature_dim)
+        self.encoder = Encoder(
+            observation_shape[0], feature_dim, leaky_slope=leaky_slope)
         # p(x(t) | z1(t), z2(t))
         self.decoder = Decoder(
             latent1_dim + latent2_dim, observation_shape[0],
-            std=np.sqrt(0.1))
+            std=np.sqrt(0.1), leaky_slope=leaky_slope)
 
     def sample_prior(self, actions):
         ''' Sample from prior dynamics.

@@ -1,18 +1,19 @@
 import torch
-from rltorch.network import create_linear_network
+from torch import nn
 
-from network.base import BaseNetwork
+from network.base import BaseNetwork, create_linear_network,\
+    weights_init_xavier
 
 
 class QNetwork(BaseNetwork):
 
     def __init__(self, latent_dim, action_dim, hidden_units=[256, 256],
-                 initializer='xavier'):
+                 initializer=weights_init_xavier):
         super(QNetwork, self).__init__()
 
         self.Q = create_linear_network(
             latent_dim + action_dim, 1, hidden_units=hidden_units,
-            initializer=initializer)
+            hidden_activation=nn.ReLU(), initializer=initializer)
 
     def forward(self, x):
         q = self.Q(x)
@@ -22,7 +23,7 @@ class QNetwork(BaseNetwork):
 class TwinnedQNetwork(BaseNetwork):
 
     def __init__(self, latent_dim, action_dim, hidden_units=[256, 256],
-                 initializer='xavier'):
+                 initializer=weights_init_xavier):
         super(TwinnedQNetwork, self).__init__()
 
         self.Q1 = QNetwork(
