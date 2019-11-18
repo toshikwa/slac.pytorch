@@ -15,6 +15,7 @@ def run():
     parser.add_argument('--domain_name', type=str, default='cheetah')
     parser.add_argument('--task_name', type=str, default='run')
     parser.add_argument('--env_id', type=str, default='HalfCheetah-v2')
+    parser.add_argument('--action_repeat', type=int, default=4)
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
@@ -26,7 +27,7 @@ def run():
         'batch_size': 256,
         'latent_batch_size': 32,
         'num_sequences': 8,
-        'action_repeat': 4,
+        'action_repeat': args.action_repeat,
         'lr': 0.0003,
         'latent_lr': 0.0001,
         'feature_dim': 256,
@@ -53,7 +54,7 @@ def run():
     if args.env_type == 'dm_control':
         env = suite.load(
             domain_name=args.domain_name, task_name=args.task_name)
-        env = PixelObservationsDmControlWrapper(env, configs['action_repeat'])
+        env = PixelObservationsDmControlWrapper(env, args.action_repeat)
         dir_name = f'{args.domain_name}-{args.task_name}'
     else:
         env = gym.make(args.env_id)
