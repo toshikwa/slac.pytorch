@@ -3,22 +3,20 @@ import numpy as np
 import torch
 
 
-class LazyFrames(object):
+class LazyFrames:
     ''' LazyFrames memory-efficiently stores stacked data. '''
 
     def __init__(self, frames, is_image=False):
         self._frames = frames
         self.is_image = is_image
+        self.out = None
 
     def _force(self):
         if self.is_image:
-            return np.stack(
-                np.array(self._frames, dtype=np.float32)/255.0,
-                axis=0)
+            out = np.array(self._frames, dtype=np.uint8)
         else:
-            return np.stack(
-                np.array(self._frames, dtype=np.float32),
-                axis=0)
+            out = np.array(self._frames, dtype=np.float32)
+        return out
 
     def __array__(self, dtype=None):
         out = self._force()
@@ -33,11 +31,10 @@ class LazyFrames(object):
         return self._force()[i]
 
 
-class SequenceBuff:
+class LazySequenceBuff:
     keys = ['state', 'action', 'reward', 'done']
 
     def __init__(self, num_sequences=8):
-        super(SequenceBuff, self).__init__()
         self.num_sequences = int(num_sequences)
 
     def reset(self):
@@ -58,25 +55,20 @@ class SequenceBuff:
         self.memory['done'].append(np.array([done], dtype=np.float32))
 
     def get(self):
-        '''
-        Returns:
-            state : (S, *observation_shape) shaped array.
-            action: (S-1, *action_shape) shaped array.
-            reward: (S-1, 1) shaped array.
-            done  : (S-1, 1) shaped array.
-        '''
-        state = LazyFrames(list(self.memory['state']), True)
-        action = LazyFrames(list(self.memory['action']))
-        reward = LazyFrames(list(self.memory['reward']))
-        done = LazyFrames(list(self.memory['done']))
+        # It's memory-efficient, but slow.
+        states = LazyFrames(list(self.memory['state']), True)
+        actions = LazyFrames(list(self.memory['action']))
+        rewards = LazyFrames(list(self.memory['reward']))
+        dones = LazyFrames(list(self.memory['done']))
 
-        return state, action, reward, done
+        return states, actions, rewards, dones
 
     def __len__(self):
         return len(self.memory['state'])
 
 
 class LazyMemory(dict):
+    ''' LazyMemory is memory-efficient but time-inefficient. '''
     keys = ['state', 'action', 'reward', 'done']
 
     def __init__(self, capacity, num_sequences, observation_shape,
@@ -95,7 +87,7 @@ class LazyMemory(dict):
         self._n = 0
         for key in self.keys:
             self[key] = [None] * self.capacity
-        self.buff = SequenceBuff(num_sequences=self.num_sequences)
+        self.buff = LazySequenceBuff(num_sequences=self.num_sequences)
 
     def set_initial_state(self, state):
         self.buff.set_init_state(state)
@@ -107,8 +99,8 @@ class LazyMemory(dict):
         self.buff.append(action, reward, next_state, done)
 
         if len(self.buff) == self.num_sequences:
-            state, action, reward, done = self.buff.get()
-            self._append(state, action, reward, done)
+            states, actions, rewards, dones = self.buff.get()
+            self._append(states, actions, rewards, dones)
 
         if done or episode_done:
             self.buff.reset()
@@ -123,6 +115,13 @@ class LazyMemory(dict):
         self._p = (self._p + 1) % self.capacity
 
     def sample(self, batch_size):
+        '''
+        Returns:
+            state : (N, S, *observation_shape) shaped tensor.
+            action: (N, S-1, *action_shape) shaped tensor.
+            reward: (N, S-1, 1) shaped tensor.
+            done  : (N, S-1, 1) shaped tensor.
+        '''
         indices = np.random.randint(low=0, high=self._n, size=batch_size)
 
         states = np.empty((
@@ -137,12 +136,13 @@ class LazyMemory(dict):
             batch_size, self.num_sequences-1, 1), dtype=np.float32)
 
         for i, index in enumerate(indices):
-            states[i, ...] = np.array(self['state'][index])
+            # Convert LazeFrames into np.ndarray(dtype=np.float32) here.
+            states[i, ...] = self['state'][index]
             actions[i, ...] = self['action'][index]
             rewards[i, ...] = self['reward'][index]
             dones[i, ...] = self['done'][index]
 
-        states = torch.FloatTensor(states).to(self.device)
+        states = torch.FloatTensor(states / 255.0).to(self.device)
         actions = torch.FloatTensor(actions).to(self.device)
         rewards = torch.FloatTensor(rewards).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)

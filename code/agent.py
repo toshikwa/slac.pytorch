@@ -173,9 +173,9 @@ class SlacAgent:
 
         while not done:
             if self.steps >= self.start_steps * self.action_repeat:
-                action = 2 * np.random.rand(*self.action_shape) - 1
-            else:
                 action = self.explore(state_deque, action_deque)
+            else:
+                action = 2 * np.random.rand(*self.action_shape) - 1
 
             next_state, reward, done, _ = self.env.step(action)
             self.steps += self.action_repeat
@@ -216,9 +216,7 @@ class SlacAgent:
         # First, update the latent model.
         images, actions, rewards, dones =\
             self.memory.sample(self.latent_batch_size)
-        features = self.latent.encoder(images)
-        latent_loss = self.calc_latent_loss(
-            images, features, actions, rewards, dones)
+        latent_loss = self.calc_latent_loss(images, actions, rewards, dones)
 
         # Then, update policy and critic.
         images, actions, rewards, dones =\
@@ -226,7 +224,6 @@ class SlacAgent:
 
         # Don't update the latent model when updating policy and critic.
         with torch.no_grad():
-            # Sample latent vectors from posterior dynamics.
             features = self.latent.encoder(images)
             (latents1, latents2), _ =\
                 self.latent.sample_posterior(features, actions)
@@ -281,8 +278,11 @@ class SlacAgent:
                 'stats/entropy', entropies.detach().mean().item(),
                 self.learning_steps)
 
-    def calc_latent_loss(self, images, features, actions, rewards, dones):
+    def calc_latent_loss(self, images, actions, rewards, dones):
         num_sequences = actions.size(1) + 1
+
+        # Encode images.
+        features = self.latent.encoder(images)
 
         # Sample from posterior dynamics. (N, S, L*) samples, (S, N, L*) dists.
         (latent1_post_samples, latent2_post_samples),\
