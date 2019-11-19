@@ -135,12 +135,13 @@ class SlacAgent:
 
     def deque_to_batch(self, state_deque, action_deque):
         # feature: (1, 256*S)
-        state = (np.stack(state_deque, axis=0)/255.0).astype(np.float32)
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        state = np.array(state_deque, dtype=np.uint8)
+        state = torch.CharTensor(
+            state).unsqueeze(0).to(self.device).float() / 255.0
         with torch.no_grad():
             feature = self.latent.encoder(state).view(1, -1)
         # action: (1, |A|*(S-1))
-        action = np.stack(action_deque, axis=0)
+        action = np.array(action_deque, dtype=np.float32)
         action = torch.FloatTensor(action).view(1, -1).to(self.device)
         # trajectory: (1, 256*S + |A|*(S-1))
         trajectory = torch.cat([feature, action], dim=-1)
@@ -209,18 +210,17 @@ class SlacAgent:
               f'time: {end - start:<3.3f}')
 
     def learn(self):
-        self.learning_steps += 1
         if self.learning_steps % self.target_update_interval == 0:
             soft_update(self.critic_target, self.critic, self.tau)
 
         # First, update the latent model.
         images, actions, rewards, dones =\
-            self.memory.sample(self.latent_batch_size)
+            self.memory.sample_latent(self.latent_batch_size)
         latent_loss = self.calc_latent_loss(images, actions, rewards, dones)
 
         # Then, update policy and critic.
         images, actions, rewards, dones =\
-            self.memory.sample(self.batch_size)
+            self.memory.sample_sac(self.batch_size)
 
         # Don't update the latent model when updating policy and critic.
         with torch.no_grad():
@@ -354,8 +354,7 @@ class SlacAgent:
             next_q1, next_q2 = self.critic_target(latents[:, -1], next_actions)
             next_q = torch.min(next_q1, next_q2) + self.alpha * next_entropies
 
-        target_q =\
-            rewards[:, -1] + (1.0 - dones[:, -1]) * self.gamma * next_q
+        target_q = rewards + (1.0 - dones) * self.gamma * next_q
 
         # Critic losses are mean squared TD errors.
         q1_loss = torch.mean((curr_q1 - target_q).pow(2))
