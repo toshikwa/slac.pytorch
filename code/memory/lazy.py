@@ -113,52 +113,52 @@ class LazyMemory(dict):
     def sample_latent(self, batch_size):
         '''
         Returns:
-            state : (N, S+1, *observation_shape) shaped tensor.
-            action: (N, S, *action_shape) shaped tensor.
-            reward: (N, S, 1) shaped tensor.
-            done  : (N, S, 1) shaped tensor.
+            states_seq  : (N, S+1, *observation_shape) shaped tensor.
+            actions_seq : (N, S, *action_shape) shaped tensor.
+            rewards_seq : (N, S, 1) shaped tensor.
+            dones_seq   : (N, S, 1) shaped tensor.
         '''
         indices = np.random.randint(low=0, high=self._n, size=batch_size)
 
-        states = np.empty((
+        states_seq = np.empty((
             batch_size, self.num_sequences+1, *self.observation_shape),
             dtype=np.uint8)
-        actions = np.empty((
+        actions_seq = np.empty((
             batch_size, self.num_sequences, *self.action_shape),
             dtype=np.float32)
-        rewards = np.empty((
+        rewards_seq = np.empty((
             batch_size, self.num_sequences, 1), dtype=np.float32)
-        dones = np.empty((
+        dones_seq = np.empty((
             batch_size, self.num_sequences, 1), dtype=np.bool)
 
         for i, index in enumerate(indices):
             # Convert LazeFrames into np.ndarray here.
-            states[i, ...] = self['state'][index]
-            actions[i, ...] = self['action'][index]
-            rewards[i, ...] = self['reward'][index]
-            dones[i, ...] = self['done'][index]
+            states_seq[i, ...] = self['state'][index]
+            actions_seq[i, ...] = self['action'][index]
+            rewards_seq[i, ...] = self['reward'][index]
+            dones_seq[i, ...] = self['done'][index]
 
-        states = torch.ByteTensor(states).to(self.device).float() / 255.0
-        actions = torch.FloatTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        dones = torch.BoolTensor(dones).to(self.device).float()
+        states_seq = torch.ByteTensor(states_seq).to(self.device).float()/255.
+        actions_seq = torch.FloatTensor(actions_seq).to(self.device)
+        rewards_seq = torch.FloatTensor(rewards_seq).to(self.device)
+        dones_seq = torch.BoolTensor(dones_seq).to(self.device).float()
 
-        return states, actions, rewards, dones
+        return states_seq, actions_seq, rewards_seq, dones_seq
 
     def sample_sac(self, batch_size):
         '''
         Returns:
-            state : (N, S+1, *observation_shape) shaped tensor.
-            action: (N, S, *action_shape) shaped tensor.
-            reward: (N, 1) shaped tensor.
-            done  : (N, 1) shaped tensor.
+            states_seq  : (N, S+1, *observation_shape) shaped tensor.
+            actions_seq : (N, S, *action_shape) shaped tensor.
+            rewards     : (N, 1) shaped tensor.
+            dones       : (N, 1) shaped tensor.
         '''
         indices = np.random.randint(low=0, high=self._n, size=batch_size)
 
-        states = np.empty((
+        states_seq = np.empty((
             batch_size, self.num_sequences+1, *self.observation_shape),
             dtype=np.uint8)
-        actions = np.empty((
+        actions_seq = np.empty((
             batch_size, self.num_sequences, *self.action_shape),
             dtype=np.float32)
         rewards = np.empty((batch_size, 1), dtype=np.float32)
@@ -166,17 +166,17 @@ class LazyMemory(dict):
 
         for i, index in enumerate(indices):
             # Convert LazeFrames into np.ndarray here.
-            states[i, ...] = self['state'][index]
-            actions[i, ...] = self['action'][index]
+            states_seq[i, ...] = self['state'][index]
+            actions_seq[i, ...] = self['action'][index]
             rewards[i, ...] = self['reward'][index][-1]
             dones[i, ...] = self['done'][index][-1]
 
-        states = torch.ByteTensor(states).to(self.device).float() / 255.0
-        actions = torch.FloatTensor(actions).to(self.device)
+        states_seq = torch.ByteTensor(states_seq).to(self.device).float()/255.
+        actions_seq = torch.FloatTensor(actions_seq).to(self.device)
         rewards = torch.FloatTensor(rewards).to(self.device)
         dones = torch.BoolTensor(dones).to(self.device).float()
 
-        return states, actions, rewards, dones
+        return states_seq, actions_seq, rewards, dones
 
     def __len__(self):
         return self._n

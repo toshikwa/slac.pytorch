@@ -166,14 +166,17 @@ class LatentNetwork(BaseNetwork):
             std=np.sqrt(0.1), leaky_slope=leaky_slope)
 
     def sample_prior(self, actions_seq, init_features=None):
-        ''' Sample from prior dynamics.
+        ''' Sample from prior dynamics (with conditionning on the initial frames).
         Args:
-            actions_seq   : (N, S, *action_shape) shaped tensor.
-            init_features : (N, *) shaped tensor or None.
+            actions_seq   : (N, S, *action_shape) tensor of action sequences.
+            init_features : (N, *) tensor of initial frames or None.
+        Returns:
+            latent1_samples : (N, S+1, L1) tensor of sampled latent vectors.
+            latent2_samples : (N, S+1, L2) tensor of sampled latent vectors.
+            latent1_dists   : (S+1) length list of (N, L1) distributions.
+            latent2_dists   : (S+1) length list of (N, L2) distributions.
         '''
         num_sequences = actions_seq.size(1)
-
-        # (S, N, *action_shape)
         actions_seq = torch.transpose(actions_seq, 0, 1)
 
         latent1_samples = []
@@ -183,6 +186,7 @@ class LatentNetwork(BaseNetwork):
 
         for t in range(num_sequences + 1):
             if t == 0:
+                # Condition on initial frames.
                 if init_features is not None:
                     # q(z1(0) | feat(0))
                     latent1_dist = self.latent1_init_posterior(init_features)
@@ -190,6 +194,8 @@ class LatentNetwork(BaseNetwork):
                     # q(z2(0) | z1(0))
                     latent2_dist = self.latent2_init_posterior(latent1_sample)
                     latent2_sample = latent2_dist.rsample()
+
+                # Not conditionning.
                 else:
                     # p(z1(0)) = N(0, I)
                     latent1_dist = self.latent1_init_prior(actions_seq[t])
@@ -213,9 +219,7 @@ class LatentNetwork(BaseNetwork):
             latent1_dists.append(latent1_dist)
             latent2_dists.append(latent2_dist)
 
-        # (N, S+1, L1)
         latent1_samples = torch.stack(latent1_samples, dim=1)
-        # (N, S+1, L2)
         latent2_samples = torch.stack(latent2_samples, dim=1)
 
         return (latent1_samples, latent2_samples),\
@@ -224,14 +228,16 @@ class LatentNetwork(BaseNetwork):
     def sample_posterior(self, features_seq, actions_seq):
         ''' Sample from posterior dynamics.
         Args:
-            features_seq : (N, S+1, 256) shaped tensor.
-            actions_seq  : (N, S, *action_space) shaped tensor.
+            features_seq : (N, S+1, 256) tensor of feature sequenses.
+            actions_seq  : (N, S, *action_space) tensor of action sequenses.
+        Returns:
+            latent1_samples : (N, S+1, L1) tensor of sampled latent vectors.
+            latent2_samples : (N, S+1, L2) tensor of sampled latent vectors.
+            latent1_dists   : (S+1) length list of (N, L1) distributions.
+            latent2_dists   : (S+1) length list of (N, L2) distributions.
         '''
         num_sequences = actions_seq.size(1)
-
-        # (S+1, N, 256)
         features_seq = torch.transpose(features_seq, 0, 1)
-        # (S, N, *action_space)
         actions_seq = torch.transpose(actions_seq, 0, 1)
 
         latent1_samples = []
@@ -262,9 +268,7 @@ class LatentNetwork(BaseNetwork):
             latent1_dists.append(latent1_dist)
             latent2_dists.append(latent2_dist)
 
-        # (N, S+1, L1)
         latent1_samples = torch.stack(latent1_samples, dim=1)
-        # (N, S+1, L2)
         latent2_samples = torch.stack(latent2_samples, dim=1)
 
         return (latent1_samples, latent2_samples),\
