@@ -35,7 +35,7 @@ def run():
         'latent2_dim': 256,
         'hidden_units': [256, 256],
         'memory_size': 1e5,
-        'gamma': 0.99,
+        'gamma': 1.0,
         'target_update_interval': 1,
         'tau': 0.005,
         'entropy_tuning': True,

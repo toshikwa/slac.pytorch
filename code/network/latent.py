@@ -22,7 +22,7 @@ class Gaussian(BaseNetwork):
         self.std = std
 
     def forward(self, x):
-        if isinstance(x, list):
+        if isinstance(x, list) or isinstance(x, tuple):
             x = torch.cat(x, dim=-1)
 
         x = self.net(x)
@@ -74,7 +74,7 @@ class Decoder(BaseNetwork):
         ).apply(weights_init_xavier)
 
     def forward(self, x):
-        if isinstance(x, list):
+        if isinstance(x, list) or isinstance(x, tuple):
             x = torch.cat(x,  dim=-1)
 
         num_batches, num_sequences, latent_dim = x.size()
@@ -165,38 +165,47 @@ class LatentNetwork(BaseNetwork):
             latent1_dim + latent2_dim, observation_shape[0],
             std=np.sqrt(0.1), leaky_slope=leaky_slope)
 
-    def sample_prior(self, actions):
+    def sample_prior(self, actions_seq, init_features=None):
         ''' Sample from prior dynamics.
         Args:
-            actions : (N, S-1, *action_shape) shaped tensor.
+            actions_seq   : (N, S, *action_shape) shaped tensor.
+            init_features : (N, *) shaped tensor or None.
         '''
-        num_sequences = actions.size(1) + 1
+        num_sequences = actions_seq.size(1)
 
-        # (S-1, N, *action_shape)
-        actions = torch.transpose(actions, 0, 1)
+        # (S, N, *action_shape)
+        actions_seq = torch.transpose(actions_seq, 0, 1)
 
         latent1_samples = []
         latent2_samples = []
         latent1_dists = []
         latent2_dists = []
 
-        for t in range(num_sequences):
+        for t in range(num_sequences + 1):
             if t == 0:
-                # p(z1(0)) = N(0, I)
-                latent1_dist = self.latent1_init_prior(actions[t])
-                latent1_sample = latent1_dist.rsample()
-                # p(z2(0) | z1(0))
-                latent2_dist = self.latent2_init_prior(latent1_sample)
-                latent2_sample = latent2_dist.rsample()
+                if init_features is not None:
+                    # q(z1(0) | feat(0))
+                    latent1_dist = self.latent1_init_posterior(init_features)
+                    latent1_sample = latent1_dist.rsample()
+                    # q(z2(0) | z1(0))
+                    latent2_dist = self.latent2_init_posterior(latent1_sample)
+                    latent2_sample = latent2_dist.rsample()
+                else:
+                    # p(z1(0)) = N(0, I)
+                    latent1_dist = self.latent1_init_prior(actions_seq[t])
+                    latent1_sample = latent1_dist.rsample()
+                    # p(z2(0) | z1(0))
+                    latent2_dist = self.latent2_init_prior(latent1_sample)
+                    latent2_sample = latent2_dist.rsample()
 
             else:
                 # p(z1(t) | z2(t-1), a(t-1))
                 latent1_dist = self.latent1_prior(
-                    [latent2_samples[t-1], actions[t-1]])
+                    [latent2_samples[t-1], actions_seq[t-1]])
                 latent1_sample = latent1_dist.rsample()
                 # p(z2(t) | z1(t), z2(t-1), a(t-1))
                 latent2_dist = self.latent2_prior(
-                    [latent1_sample, latent2_samples[t-1], actions[t-1]])
+                    [latent1_sample, latent2_samples[t-1], actions_seq[t-1]])
                 latent2_sample = latent2_dist.rsample()
 
             latent1_samples.append(latent1_sample)
@@ -204,36 +213,36 @@ class LatentNetwork(BaseNetwork):
             latent1_dists.append(latent1_dist)
             latent2_dists.append(latent2_dist)
 
-        # (N, S, L1)
+        # (N, S+1, L1)
         latent1_samples = torch.stack(latent1_samples, dim=1)
-        # (N, S, L2)
+        # (N, S+1, L2)
         latent2_samples = torch.stack(latent2_samples, dim=1)
 
         return (latent1_samples, latent2_samples),\
             (latent1_dists, latent2_dists)
 
-    def sample_posterior(self, features, actions):
+    def sample_posterior(self, features_seq, actions_seq):
         ''' Sample from posterior dynamics.
         Args:
-            features: (N, S, 256) shaped tensor.
-            actions : (N, S-1, *action_space) shaped tensor.
+            features_seq : (N, S+1, 256) shaped tensor.
+            actions_seq  : (N, S, *action_space) shaped tensor.
         '''
-        num_sequences = actions.size(1) + 1
+        num_sequences = actions_seq.size(1)
 
-        # (S, N, 256)
-        features = torch.transpose(features, 0, 1)
-        # (S-1, N, *action_space)
-        actions = torch.transpose(actions, 0, 1)
+        # (S+1, N, 256)
+        features_seq = torch.transpose(features_seq, 0, 1)
+        # (S, N, *action_space)
+        actions_seq = torch.transpose(actions_seq, 0, 1)
 
         latent1_samples = []
         latent2_samples = []
         latent1_dists = []
         latent2_dists = []
 
-        for t in range(num_sequences):
+        for t in range(num_sequences + 1):
             if t == 0:
                 # q(z1(0) | feat(0))
-                latent1_dist = self.latent1_init_posterior(features[t])
+                latent1_dist = self.latent1_init_posterior(features_seq[t])
                 latent1_sample = latent1_dist.rsample()
                 # q(z2(0) | z1(0))
                 latent2_dist = self.latent2_init_posterior(latent1_sample)
@@ -241,11 +250,11 @@ class LatentNetwork(BaseNetwork):
             else:
                 # q(z1(t) | feat(t), z2(t-1), a(t-1))
                 latent1_dist = self.latent1_posterior(
-                    [features[t], latent2_samples[t-1], actions[t-1]])
+                    [features_seq[t], latent2_samples[t-1], actions_seq[t-1]])
                 latent1_sample = latent1_dist.rsample()
                 # q(z2(t) | z1(t), z2(t-1), a(t-1))
                 latent2_dist = self.latent2_posterior(
-                    [latent1_sample, latent2_samples[t-1], actions[t-1]])
+                    [latent1_sample, latent2_samples[t-1], actions_seq[t-1]])
                 latent2_sample = latent2_dist.rsample()
 
             latent1_samples.append(latent1_sample)
@@ -253,9 +262,9 @@ class LatentNetwork(BaseNetwork):
             latent1_dists.append(latent1_dist)
             latent2_dists.append(latent2_dist)
 
-        # (N, S, 32)
+        # (N, S+1, L1)
         latent1_samples = torch.stack(latent1_samples, dim=1)
-        # (N, S, 256)
+        # (N, S+1, L2)
         latent2_samples = torch.stack(latent2_samples, dim=1)
 
         return (latent1_samples, latent2_samples),\

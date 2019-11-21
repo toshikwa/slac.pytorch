@@ -4,6 +4,23 @@ import torch
 from torch.distributions.kl import kl_divergence
 
 
+def create_feature_actions(features_seq, actions_seq):
+    N = features_seq.size(0)
+
+    # sequence of features
+    f = features_seq[:, :-1].view(N, -1)
+    n_f = features_seq[:, 1:].view(N, -1)
+    # sequence of actions
+    a = actions_seq[:, :-1].view(N, -1)
+    n_a = actions_seq[:, 1:].view(N, -1)
+
+    # feature_actions
+    fa = torch.cat([f, a], dim=-1)
+    n_fa = torch.cat([n_f, n_a], dim=-1)
+
+    return fa, n_fa
+
+
 def calc_kl_divergence(p_list, q_list):
     assert len(p_list) == len(q_list)
 
