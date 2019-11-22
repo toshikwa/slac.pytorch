@@ -1,6 +1,4 @@
 numpy
 torch
-gym
 tensorboard
-git+git://github.com/tensorflow/agents.git
-git+git://github.com/deepmind/dm_control.git
+gym
