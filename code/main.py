@@ -4,8 +4,7 @@ import gym
 from datetime import datetime
 from dm_control import suite
 
-from env import PixelObservationsDmControlWrapper,\
-    PixelObservationsGymWrapper
+from env import DmControlEnvForPytorch, GymEnvForPyTorch
 from agent import SlacAgent
 
 
@@ -20,22 +19,22 @@ def run():
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
 
-    # You can define configs in the external json or yaml file.
+    # Configs which are constant acoss all tasks.
     configs = {
         'env_type': args.env_type,
         'num_steps': 3000000,
+        'initial_latent_steps': 100000,
         'batch_size': 256,
         'latent_batch_size': 32,
         'num_sequences': 8,
-        'action_repeat': args.action_repeat,
         'lr': 0.0003,
         'latent_lr': 0.0001,
         'feature_dim': 256,
         'latent1_dim': 32,
         'latent2_dim': 256,
         'hidden_units': [256, 256],
-        'memory_size': 1e5,
-        'gamma': 1.0,
+        'memory_size': 100000,
+        'gamma': 0.99,
         'target_update_interval': 1,
         'tau': 0.005,
         'entropy_tuning': True,
@@ -44,9 +43,9 @@ def run():
         'grad_clip': None,
         'updates_per_step': 1,
         'start_steps': 10000,
-        'training_log_interval': 10,
+        'training_log_interval': 4,
         'learning_log_interval': 100,
-        'eval_interval': 50000,
+        'eval_interval': 10000,
         'cuda': args.cuda,
         'seed': args.seed
     }
@@ -54,11 +53,11 @@ def run():
     if args.env_type == 'dm_control':
         env = suite.load(
             domain_name=args.domain_name, task_name=args.task_name)
-        env = PixelObservationsDmControlWrapper(env, args.action_repeat)
+        env = DmControlEnvForPytorch(env, args.action_repeat)
         dir_name = f'{args.domain_name}-{args.task_name}'
     else:
         env = gym.make(args.env_id)
-        env = PixelObservationsGymWrapper(env)
+        env = GymEnvForPyTorch(env, args.action_repeat)
         dir_name = args.env_id
 
     log_dir = os.path.join(

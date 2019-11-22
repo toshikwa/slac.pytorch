@@ -14,8 +14,8 @@ from utils import create_feature_actions, calc_kl_divergence, grad_false,\
 class SlacAgent:
     def __init__(self, env, log_dir, env_type='dm_control', num_steps=3000000,
                  initial_latent_steps=100000, batch_size=256,
-                 latent_batch_size=32, num_sequences=8, action_repeat=4,
-                 lr=0.0003, latent_lr=0.0001, feature_dim=256, latent1_dim=32,
+                 latent_batch_size=32, num_sequences=8, lr=0.0003,
+                 latent_lr=0.0001, feature_dim=256, latent1_dim=32,
                  latent2_dim=256, hidden_units=[256, 256], memory_size=1e5,
                  gamma=0.99, target_update_interval=1, tau=0.005,
                  entropy_tuning=True, ent_coef=0.2, leaky_slope=0.2,
@@ -26,6 +26,7 @@ class SlacAgent:
         self.env = env
         self.observation_shape = self.env.observation_space.shape
         self.action_shape = self.env.action_space.shape
+        self.action_repeat = self.env.action_repeat
 
         torch.manual_seed(seed)
         np.random.seed(seed)
@@ -96,7 +97,6 @@ class SlacAgent:
         self.episodes = 0
         self.initial_latent_steps = initial_latent_steps
         self.num_sequences = num_sequences
-        self.action_repeat = action_repeat
         self.num_steps = num_steps
         self.tau = tau
         self.batch_size = batch_size

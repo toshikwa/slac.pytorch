@@ -1,40 +1,18 @@
-import collections
-from gym import Wrapper, spaces
+import gym
 import numpy as np
 
 
-class RenderGymWrapper(Wrapper):
-
-    def __init__(self, env, render_kwargs=None):
-        super(RenderGymWrapper, self).__init__(env)
-        self._render_kwargs = dict(
-            width=64,
-            height=64,
-            depth=False,
-            camera_name='track',
-        )
-        if render_kwargs is not None:
-            self._render_kwargs.update(render_kwargs)
-
-    @property
-    def sim(self):
-        return self._env.sim
-
-    def render(self, mode='rgb_array'):
-        if mode == 'rgb_array':
-            return self._env.sim.render(**self._render_kwargs)[::-1, :, :]
-        else:
-            return self._env.render(mode=mode)
-
-
-class PixelObservationsGymWrapper(Wrapper):
+class GymEnvForPyTorch(gym.Env):
     keys = ['state', 'pixels']
 
-    def __init__(self, env, obs_type='pixels', render_kwargs=None):
-        super(PixelObservationsGymWrapper, self).__init__(env)
+    def __init__(self, env, action_repeat=1, obs_type='pixels',
+                 render_kwargs=None):
         assert obs_type in self.keys
+        self.env = env
+        self.action_repeat = action_repeat
+        self.obs_type = obs_type
 
-        self._render_kwargs = dict(
+        self.render_kwargs = dict(
             width=64,
             height=64,
             depth=False,
@@ -42,36 +20,41 @@ class PixelObservationsGymWrapper(Wrapper):
         )
 
         if render_kwargs is not None:
-            self._render_kwargs.update(render_kwargs)
+            self.render_kwargs.update(render_kwargs)
 
         if obs_type == 'state':
             self.observation_space = self.env.observation_space
         elif obs_type == 'pixels':
-            image_shape = (
-                3, self._render_kwargs['height'], self._render_kwargs['width'])
-            image_space = spaces.Box(
-                0, 255, shape=image_shape, dtype=np.uint8)
-            self.observation_space = image_space
+            obs_shape = (
+                3, self.render_kwargs['height'], self.render_kwargs['width'])
+            self.observation_space = gym.spaces.Box(
+                0, 255, shape=obs_shape, dtype=np.uint8)
+        else:
+            NotImplementedError
 
-        self.obe_type = obs_type
+        self.action_space = self.env.action_space
 
-    def _modify_observation(self, observation):
-        if self.obe_type == 'state':
-            obs = observation
-        elif self.obe_type == 'pixels':
-            image = self.env.sim.render(**self._render_kwargs)[::-1, :, :]
-            obs = np.transpose(image, (2, 0, 1))
-
+    def _preprocess_obs(self, obs):
+        if self.obs_type == 'pixels':
+            image = self.env.sim.render(**self.render_kwargs)[::-1, :, :]
+            obs = np.transpose(image, [2, 0, 1])
         return obs
 
     def step(self, action):
-        observation, reward, done, info = self.env.step(action)
-        observation = self._modify_observation(observation)
-        return observation, reward, done, info
+        sum_reward = 0.0
+        for _ in range(self.action_repeat):
+            obs, reward, done, _ = self.env.step(action)
+            sum_reward += reward
+            if done:
+                break
+        return self._preprocess_obs(obs), reward, done, None
 
     def reset(self):
-        observation = self.env.reset()
-        return self._modify_observation(observation)
+        obs = self.env.reset()
+        return self._preprocess_obs(obs)
 
     def render(self, mode='rgb_array'):
         return self.env.render(mode=mode)
+
+    def seed(self, seed):
+        self.env.seed(seed)

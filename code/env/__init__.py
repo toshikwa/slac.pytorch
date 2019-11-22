@@ -1,2 +1,2 @@
-from .dm_control import PixelObservationsDmControlWrapper
-from .gym import PixelObservationsGymWrapper
+from .dm_control import DmControlEnvForPytorch
+from .gym import GymEnvForPyTorch
