@@ -1,5 +1,4 @@
 import os
-from time import time
 from collections import deque
 import numpy as np
 import torch
@@ -14,11 +13,12 @@ from utils import create_feature_actions, calc_kl_divergence, grad_false,\
 
 class SlacAgent:
     def __init__(self, env, log_dir, env_type='dm_control', num_steps=3000000,
-                 batch_size=256, latent_batch_size=32, num_sequences=8,
-                 action_repeat=4, lr=0.0003, latent_lr=0.0001, feature_dim=256,
-                 latent1_dim=32, latent2_dim=256, hidden_units=[256, 256],
-                 memory_size=1e5, gamma=1.0, target_update_interval=1,
-                 tau=0.005, entropy_tuning=True, ent_coef=0.2, leaky_slope=0.2,
+                 initial_latent_steps=100000, batch_size=256,
+                 latent_batch_size=32, num_sequences=8, action_repeat=4,
+                 lr=0.0003, latent_lr=0.0001, feature_dim=256, latent1_dim=32,
+                 latent2_dim=256, hidden_units=[256, 256], memory_size=1e5,
+                 gamma=0.99, target_update_interval=1, tau=0.005,
+                 entropy_tuning=True, ent_coef=0.2, leaky_slope=0.2,
                  grad_clip=None, updates_per_step=1, start_steps=10000,
                  training_log_interval=10, learning_log_interval=100,
                  eval_interval=50000, cuda=True, seed=0):
@@ -29,6 +29,7 @@ class SlacAgent:
 
         torch.manual_seed(seed)
         np.random.seed(seed)
+        self.env.seed(seed)
         # torch.backends.cudnn.deterministic = True  # It harms a performance.
         # torch.backends.cudnn.benchmark = False  # It harms a performance.
 
@@ -46,10 +47,10 @@ class SlacAgent:
             self.action_shape[0], hidden_units).to(self.device)
 
         self.critic = TwinnedQNetwork(
-            latent1_dim+latent2_dim, self.action_shape[0], hidden_units
+            latent1_dim + latent2_dim, self.action_shape[0], hidden_units
             ).to(self.device)
         self.critic_target = TwinnedQNetwork(
-            latent1_dim+latent2_dim, self.action_shape[0], hidden_units
+            latent1_dim + latent2_dim, self.action_shape[0], hidden_units
             ).to(self.device).eval()
 
         # Copy parameters of the learning network to the target network.
@@ -93,6 +94,7 @@ class SlacAgent:
         self.steps = 0
         self.learning_steps = 0
         self.episodes = 0
+        self.initial_latent_steps = initial_latent_steps
         self.num_sequences = num_sequences
         self.action_repeat = action_repeat
         self.num_steps = num_steps
@@ -160,7 +162,6 @@ class SlacAgent:
         return action.cpu().numpy().reshape(-1)
 
     def train_episode(self):
-        start = time()
         self.episodes += 1
         episode_reward = 0.
         episode_steps = 0
@@ -183,6 +184,16 @@ class SlacAgent:
             self.memory.append(action, reward, next_state, done)
 
             if self.is_update():
+                # First, train the latent model only.
+                if self.learning_steps < self.initial_latent_steps:
+                    print('-'*60)
+                    print('Learning the latent model only...')
+                    for _ in range(self.initial_latent_steps):
+                        self.learning_steps += 1
+                        self.learn_latent()
+                    print('Finish learning the latent model.')
+                    print('-'*60)
+
                 for _ in range(self.updates_per_step):
                     self.learn()
 
@@ -200,20 +211,18 @@ class SlacAgent:
             self.writer.add_scalar(
                 'reward/train', self.train_rewards.get(), self.steps)
 
-        end = time()
         print(f'episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '
-              f'reward: {episode_reward:<5.1f}  '
-              f'time: {end - start:<3.3f}')
+              f'reward: {episode_reward:<5.1f}')
 
     def learn(self):
         self.learning_steps += 1
         if self.learning_steps % self.target_update_interval == 0:
             soft_update(self.critic_target, self.critic, self.tau)
 
-        # First, update the latent model.
+        # Update the latent model.
         self.learn_latent()
-        # Then, update policy and critic.
+        # Update policy and critic.
         self.learn_sac()
 
     def learn_latent(self):
@@ -235,6 +244,7 @@ class SlacAgent:
 
         # NOTE: Don't update the encoder part of the policy here.
         with torch.no_grad():
+            # f(1:t+1)
             features_seq = self.latent.encoder(images_seq)
             latent_samples, _ = self.latent.sample_posterior(
                 features_seq, actions_seq)
@@ -251,9 +261,9 @@ class SlacAgent:
 
         q1_loss, q2_loss = self.calc_critic_loss(
             latents, next_latents, actions, next_feature_actions,
-            rewards, dones)
-        policy_loss, entropies =\
-            self.calc_policy_loss(latents, feature_actions)
+            rewards)
+        policy_loss, entropies = self.calc_policy_loss(
+            latents, feature_actions)
 
         update_params(
             self.q1_optim, self.critic.Q1, q1_loss, self.grad_clip)
@@ -354,16 +364,16 @@ class SlacAgent:
                 [gt_images, post_images, cond_pri_images, pri_images],
                 dim=-2)
 
-            # Visualize 8 images because 9th image is wrapped to next line,
-            # which is not beautiful. (You can change here.)
+            # Visualize multiple of 8 images because each row contains 8
+            # images at most.
             self.writer.add_images(
-                'images/gt_posterior_cond-prior_prior', images[:8],
-                self.learning_steps)
+                'images/gt_posterior_cond-prior_prior',
+                images[:(len(images)//8)*8], self.learning_steps)
 
         return latent_loss
 
     def calc_critic_loss(self, latents, next_latents, actions,
-                         next_feature_actions, rewards, dones):
+                         next_feature_actions, rewards):
         # Q(z(t), a(t))
         curr_q1, curr_q2 = self.critic(latents, actions)
         # E[Q(z(t+1), a(t+1)) + alpha * H(pi)]
@@ -373,11 +383,11 @@ class SlacAgent:
             next_q1, next_q2 = self.critic_target(next_latents, next_actions)
             next_q = torch.min(next_q1, next_q2) + self.alpha * next_entropies
         # r(t) + gamma * E[Q(z(t+1), a(t+1)) + alpha * H(pi)]
-        target_q = rewards + (1.0 - dones) * self.gamma * next_q
+        target_q = rewards + self.gamma * next_q
 
         # Critic losses are mean squared TD errors.
-        q1_loss = torch.mean((curr_q1 - target_q).pow(2))
-        q2_loss = torch.mean((curr_q2 - target_q).pow(2))
+        q1_loss = 0.5 * torch.mean((curr_q1 - target_q).pow(2))
+        q2_loss = 0.5 * torch.mean((curr_q2 - target_q).pow(2))
 
         if self.learning_steps % self.learning_log_interval == 0:
             mean_q1 = curr_q1.detach().mean().item()
@@ -433,8 +443,8 @@ class SlacAgent:
         self.writer.add_scalar(
             'reward/test', mean_return, self.steps)
         print('-' * 60)
-        print(f'steps: {self.steps:<5}  '
-              f'reward: {mean_return:<5.1f} +/- {std_return:<5.1f}')
+        print(f'environment steps: {self.steps:<5}  '
+              f'return: {mean_return:<5.1f} +/- {std_return:<5.1f}')
         print('-' * 60)
 
     def save_models(self):
