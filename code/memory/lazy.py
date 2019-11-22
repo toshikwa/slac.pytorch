@@ -151,7 +151,6 @@ class LazyMemory(dict):
             states_seq  : (N, S+1, *observation_shape) shaped tensor.
             actions_seq : (N, S, *action_shape) shaped tensor.
             rewards     : (N, 1) shaped tensor.
-            dones       : (N, 1) shaped tensor.
         '''
         indices = np.random.randint(low=0, high=self._n, size=batch_size)
 
@@ -162,21 +161,18 @@ class LazyMemory(dict):
             batch_size, self.num_sequences, *self.action_shape),
             dtype=np.float32)
         rewards = np.empty((batch_size, 1), dtype=np.float32)
-        dones = np.empty((batch_size, 1), dtype=np.bool)
 
         for i, index in enumerate(indices):
             # Convert LazeFrames into np.ndarray here.
             states_seq[i, ...] = self['state'][index]
             actions_seq[i, ...] = self['action'][index]
             rewards[i, ...] = self['reward'][index][-1]
-            dones[i, ...] = self['done'][index][-1]
 
         states_seq = torch.ByteTensor(states_seq).to(self.device).float()/255.
         actions_seq = torch.FloatTensor(actions_seq).to(self.device)
         rewards = torch.FloatTensor(rewards).to(self.device)
-        dones = torch.BoolTensor(dones).to(self.device).float()
 
-        return states_seq, actions_seq, rewards, dones
+        return states_seq, actions_seq, rewards
 
     def __len__(self):
         return self._n

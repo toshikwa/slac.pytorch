@@ -239,7 +239,7 @@ class SlacAgent:
                 self.learning_steps)
 
     def learn_sac(self):
-        images_seq, actions_seq, rewards, dones =\
+        images_seq, actions_seq, rewards =\
             self.memory.sample_sac(self.batch_size)
 
         # NOTE: Don't update the encoder part of the policy here.
