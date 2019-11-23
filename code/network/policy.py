@@ -38,7 +38,7 @@ class GaussianPolicy(BaseNetwork):
         # Sample actions.
         xs = normals.rsample()
         actions = torch.tanh(xs)
-        # Calculate entropies.
+        # Calculate expectations of entropies.
         log_probs = normals.log_prob(xs)\
             - torch.log(1 - actions.pow(2) + self.eps)
         entropies = -log_probs.sum(dim=1, keepdim=True)
