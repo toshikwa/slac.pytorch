@@ -1,4 +1,5 @@
 numpy
+pillow
 torch
 tensorboard
 gym

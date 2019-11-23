@@ -72,7 +72,7 @@ class DmControlEnvForPytorch(gym.Env):
             if done:
                 break
 
-        return obs, reward, done, None
+        return obs, sum_reward, done, None
 
     def reset(self):
         return self._preprocess_obs(self.env.reset())

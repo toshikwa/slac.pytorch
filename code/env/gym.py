@@ -47,7 +47,7 @@ class GymEnvForPyTorch(gym.Env):
             sum_reward += reward
             if done:
                 break
-        return self._preprocess_obs(obs), reward, done, None
+        return self._preprocess_obs(obs), sum_reward, done, None
 
     def reset(self):
         obs = self.env.reset()
