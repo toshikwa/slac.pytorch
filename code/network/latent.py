@@ -4,8 +4,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.distributions import Normal
 
-from network.base import BaseNetwork, create_linear_network,\
-    weights_init_xavier
+from .base import BaseNetwork, create_linear_network, weights_init_xavier
 
 
 class Gaussian(BaseNetwork):

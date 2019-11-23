@@ -1,8 +1,7 @@
 import torch
 from torch import nn
 
-from network.base import BaseNetwork, create_linear_network,\
-    weights_init_xavier
+from .base import BaseNetwork, create_linear_network, weights_init_xavier
 
 
 class QNetwork(BaseNetwork):
