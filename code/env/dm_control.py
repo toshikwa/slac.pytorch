@@ -1,15 +1,17 @@
 import numpy as np
 import gym
+from dm_control import suite
 
 
 class DmControlEnvForPytorch(gym.Env):
     keys = ['state', 'pixels']
 
-    def __init__(self, env, action_repeat=1, obs_type='pixels',
-                 render_kwargs=None):
+    def __init__(self, domain_name, task_name, action_repeat=1,
+                 obs_type='pixels', render_kwargs=None):
         super(DmControlEnvForPytorch, self).__init__()
         assert obs_type in self.keys
-        self.env = env
+        self.env = suite.load(
+            domain_name=domain_name, task_name=task_name)
         self.action_repeat = action_repeat
         self.obs_type = obs_type
         self.render_kwargs = dict(

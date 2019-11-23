@@ -1,8 +1,6 @@
 import os
 import argparse
-import gym
 from datetime import datetime
-from dm_control import suite
 
 from env import DmControlEnvForPytorch, GymEnvForPyTorch
 from agent import SlacAgent
@@ -51,17 +49,15 @@ def run():
     }
 
     if args.env_type == 'dm_control':
-        env = suite.load(
-            domain_name=args.domain_name, task_name=args.task_name)
-        env = DmControlEnvForPytorch(env, args.action_repeat)
+        env = DmControlEnvForPytorch(
+            args.domain_name, args.task_name, args.action_repeat)
         dir_name = f'{args.domain_name}-{args.task_name}'
     else:
-        env = gym.make(args.env_id)
-        env = GymEnvForPyTorch(env, args.action_repeat)
+        env = GymEnvForPyTorch(args.env_id, args.action_repeat)
         dir_name = args.env_id
 
     log_dir = os.path.join(
-        'logs', dir_name,
+        'logs', args.env_type, dir_name,
         f'slac-seed{args.seed}-{datetime.now().strftime("%Y%m%d-%H%M")}')
 
     agent = SlacAgent(env=env, log_dir=log_dir, **configs)

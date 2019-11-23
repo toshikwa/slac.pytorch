@@ -5,10 +5,10 @@ import numpy as np
 class GymEnvForPyTorch(gym.Env):
     keys = ['state', 'pixels']
 
-    def __init__(self, env, action_repeat=1, obs_type='pixels',
+    def __init__(self, env_id, action_repeat=1, obs_type='pixels',
                  render_kwargs=None):
         assert obs_type in self.keys
-        self.env = env
+        self.env = gym.make(env_id)
         self.action_repeat = action_repeat
         self.obs_type = obs_type
 
