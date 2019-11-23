@@ -7,7 +7,7 @@ You can install liblaries using `pip install -r requirements.txt` except [mujoco
 Note that you need a licence to install mujoco_py. For installation, please follow instructions [here](https://github.com/deepmind/dm_control).
 
 ## Examples
-You can train SLAC agent on the task from DeepMind Control Suite like this example [here](https://github.com/ku2482/slac.pytorch/blob/master/code/main.py).
+You can train SLAC agent on the task from DeepMind Control Suite like this example [here](https://github.com/ku2482/slac.pytorch/blob/master/code/main.py). Hyperparameters except `action_repeat` are constant across all tasks. Please refer to Appendix B of the paper for details.
 
 ```
 python code/main.py \
