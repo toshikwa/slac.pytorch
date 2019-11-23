@@ -4,3 +4,4 @@ __pycache__/
 *.log
 *.out
 code/memory/flag.py
+code/play.py
