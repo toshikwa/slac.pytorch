@@ -19,7 +19,7 @@ def run():
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
 
-    # Configs which are constant acoss all tasks.
+    # Configs which are constant across all tasks.
     configs = {
         'env_type': args.env_type,
         'num_steps': 3000000,
