@@ -24,7 +24,7 @@ I haven't tested on the OpenAI Gym(MuJoCo) benchmark tasks due to OpenGL issues.
 ## Results
 Result of above example on Cheetah run and Walker walk tasks are below. Note that the horizontal axis represents environment steps, which equals agent's steps multiplied by `action_repeat`.
 
-<img src="https://user-images.githubusercontent.com/37267851/69509282-c3e23f80-0f7b-11ea-8862-299872a5b89b.png" width=420><img src="https://user-images.githubusercontent.com/37267851/69509339-f724ce80-0f7b-11ea-8df8-eb5d8aaa57fa.png" width=420>
+<img src="https://user-images.githubusercontent.com/37267851/69509282-c3e23f80-0f7b-11ea-8862-299872a5b89b.png" width=410><img src="https://user-images.githubusercontent.com/37267851/69509339-f724ce80-0f7b-11ea-8df8-eb5d8aaa57fa.png" width=410>
 
 Visualizations of image sequence corresponding to Figure 9 of the paper are below. First row is ground truth, second row is generated image from posterior sample (of the latent model), third row is generated image from prior sample only conditioned on the initial frame and last row is generated image from prior sample. Please refer to the paper for details.
 
