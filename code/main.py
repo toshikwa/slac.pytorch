@@ -19,7 +19,6 @@ def run():
 
     # Configs which are constant across all tasks.
     configs = {
-        'env_type': args.env_type,
         'num_steps': 3000000,
         'initial_latent_steps': 100000,
         'batch_size': 256,

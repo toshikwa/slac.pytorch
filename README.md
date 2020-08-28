@@ -1,6 +1,10 @@
 # Stochastic Latent Actor-Critic in PyTorch
 A PyTorch implementation of Stochastic Latent Actor-Critic[[1]](#references). I tried to make it easy for readers to understand the algorithm. Please let me know if you have any questions.
 
+**UPDATE**
+- 2020.8.28
+    - Bump torch up to 1.6.0.
+
 ## Requirements
 You can install liblaries using `pip install -r requirements.txt` except [mujoco_py](https://github.com/openai/mujoco-py) and [dm_control](https://github.com/deepmind/dm_control).
 
