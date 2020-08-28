@@ -8,11 +8,11 @@ from torch.utils.tensorboard import SummaryWriter
 from memory import LazyMemory
 from network import LatentNetwork, GaussianPolicy, TwinnedQNetwork
 from utils import create_feature_actions, calc_kl_divergence, grad_false,\
-    hard_update, soft_update, update_params, RunningMeanStats
+    soft_update, update_params, RunningMeanStats
 
 
 class SlacAgent:
-    def __init__(self, env, log_dir, env_type='dm_control', num_steps=3000000,
+    def __init__(self, env, log_dir, num_steps=3000000,
                  initial_latent_steps=100000, batch_size=256,
                  latent_batch_size=32, num_sequences=8, lr=0.0003,
                  latent_lr=0.0001, feature_dim=256, latent1_dim=32,
@@ -55,27 +55,26 @@ class SlacAgent:
             ).to(self.device).eval()
 
         # Copy parameters of the learning network to the target network.
-        hard_update(self.critic_target, self.critic)
+        soft_update(self.critic_target, self.critic, 1.0)
         # Disable gradient calculations of the target network.
         grad_false(self.critic_target)
 
         # Policy is updated without the encoder.
         self.policy_optim = Adam(self.policy.parameters(), lr=lr)
-        self.q1_optim = Adam(self.critic.Q1.parameters(), lr=lr)
-        self.q2_optim = Adam(self.critic.Q2.parameters(), lr=lr)
+        self.q_optim = Adam(self.critic.parameters(), lr=lr)
         self.latent_optim = Adam(self.latent.parameters(), lr=latent_lr)
 
         if entropy_tuning:
             # Target entropy is -|A|.
-            self.target_entropy = -torch.prod(
-                torch.Tensor(self.action_shape)).item()
-            # We optimize log(alpha), instead of alpha.
+            self.target_entropy = -self.action_shape[0]
+            # We optimize log(alpha) because alpha is always larger than 0.
             self.log_alpha = torch.zeros(
                 1, requires_grad=True, device=self.device)
-            self.alpha = self.log_alpha.exp()
             self.alpha_optim = Adam([self.log_alpha], lr=lr)
+            self.alpha = self.log_alpha.detach().exp()
+
         else:
-            self.alpha = torch.tensor(ent_coef).to(self.device)
+            self.alpha = ent_coef
 
         self.memory = LazyMemory(
             memory_size, num_sequences, self.observation_shape,
@@ -136,9 +135,8 @@ class SlacAgent:
 
     def deque_to_batch(self, state_deque, action_deque):
         # Convert deques to batched tensor.
-        state = np.array(state_deque, dtype=np.uint8)
-        state = torch.ByteTensor(
-            state).unsqueeze(0).to(self.device).float() / 255.0
+        state = np.array(state_deque, dtype=np.uint8)[None, ...]
+        state = torch.ByteTensor(state).to(self.device).float() / 255.0
         with torch.no_grad():
             feature = self.latent.encoder(state).view(1, -1)
 
@@ -262,20 +260,18 @@ class SlacAgent:
         q1_loss, q2_loss = self.calc_critic_loss(
             latents, next_latents, actions, next_feature_actions,
             rewards)
+        update_params(
+            self.q_optim, self.critic, q1_loss + q2_loss, self.grad_clip)
+
         policy_loss, entropies = self.calc_policy_loss(
             latents, feature_actions)
-
-        update_params(
-            self.q1_optim, self.critic.Q1, q1_loss, self.grad_clip)
-        update_params(
-            self.q2_optim, self.critic.Q2, q2_loss, self.grad_clip)
         update_params(
             self.policy_optim, self.policy, policy_loss, self.grad_clip)
 
         if self.entropy_tuning:
             entropy_loss = self.calc_entropy_loss(entropies)
             update_params(self.alpha_optim, None, entropy_loss)
-            self.alpha = self.log_alpha.exp()
+            self.alpha = self.log_alpha.detach().exp().item()
         else:
             entropy_loss = 0.
 

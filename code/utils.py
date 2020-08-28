@@ -45,11 +45,8 @@ def update_params(optim, network, loss, grad_clip=None, retain_graph=False):
 
 def soft_update(target, source, tau):
     for t, s in zip(target.parameters(), source.parameters()):
-        t.data.copy_(t.data * (1.0 - tau) + s.data * tau)
-
-
-def hard_update(target, source):
-    target.load_state_dict(source.state_dict())
+        t.data.mul_(1.0 - tau)
+        t.data.add_(tau * s.data)
 
 
 def grad_false(network):
