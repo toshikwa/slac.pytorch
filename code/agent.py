@@ -289,8 +289,7 @@ class SlacAgent:
                 'loss/alpha', entropy_loss.detach().item(),
                 self.learning_steps)
             self.writer.add_scalar(
-                'stats/alpha', self.alpha.detach().item(),
-                self.learning_steps)
+                'stats/alpha', self.alpha, self.learning_steps)
             self.writer.add_scalar(
                 'stats/entropy', entropies.detach().mean().item(),
                 self.learning_steps)
@@ -411,7 +410,7 @@ class SlacAgent:
         # Intuitively, we increse alpha when entropy is less than target
         # entropy, vice versa.
         entropy_loss = -torch.mean(
-            self.log_alpha * (self.target_entropy - entropies).detach())
+            self.log_alpha * (self.target_entropy - entropies.detach()))
         return entropy_loss
 
     def evaluate(self):
