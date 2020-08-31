@@ -6,9 +6,10 @@ A PyTorch implementation of Stochastic Latent Actor-Critic[[1]](#references). I 
     - Bump torch up to 1.6.0.
 
 ## Requirements
-You can install liblaries using `pip install -r requirements.txt` except [mujoco_py](https://github.com/openai/mujoco-py) and [dm_control](https://github.com/deepmind/dm_control).
+You can install liblaries using `pip install -r requirements.txt` except [mujoco_py](https://github.com/openai/mujoco-py) and [dm_control](https://github.com/deepmind/dm_control). Note that you need a licence to install mujoco_py. For installation, please follow instructions [here](https://github.com/deepmind/dm_control).
 
-Note that you need a licence to install mujoco_py. For installation, please follow instructions [here](https://github.com/deepmind/dm_control).
+If you're using other than CUDA 10.2, you may need to install the proper version of PyTorch for CUDA. See [instructions](https://pytorch.org/get-started/locally/) for more details.
+
 
 ## Examples
 You can train SLAC agent on the task from DeepMind Control Suite like this example [here](https://github.com/ku2482/slac.pytorch/blob/master/code/main.py). Hyperparameters except `action_repeat` are constant across all tasks. Please refer to Appendix B of the paper for details.
