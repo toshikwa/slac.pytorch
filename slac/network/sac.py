@@ -1,0 +1,65 @@
+import torch
+from torch import nn
+
+from slac.utils import build_mlp, reparameterize
+
+
+class GaussianPolicy(torch.jit.ScriptModule):
+    """
+    Policy parameterized as diagonal gaussian distribution.
+    """
+
+    def __init__(self, action_shape, num_sequences, feature_dim, hidden_units=(256, 256)):
+        super(GaussianPolicy, self).__init__()
+
+        # NOTE: Conv layers are shared with the latent model.
+        self.net = build_mlp(
+            input_dim=num_sequences * feature_dim + (num_sequences - 1) * action_shape[0],
+            output_dim=2 * action_shape[0],
+            hidden_units=hidden_units,
+            hidden_activation=nn.ReLU(inplace=True),
+        )
+
+    @torch.jit.script_method
+    def forward(self, x):
+        means = torch.chunk(self.net(x), 2, dim=-1)[0]
+        return torch.tanh(means)
+
+    @torch.jit.script_method
+    def sample(self, x):
+        means, log_stds = torch.chunk(self.net(x), 2, dim=-1)
+        actions, log_pis = reparameterize(means, log_stds.clamp_(-20, 2))
+        return actions, log_pis
+
+
+class TwinnedQNetwork(torch.jit.ScriptModule):
+    """
+    Twinned Q networks.
+    """
+
+    def __init__(
+        self,
+        action_shape,
+        z1_dim,
+        z2_dim,
+        hidden_units=(256, 256),
+    ):
+        super(TwinnedQNetwork, self).__init__()
+
+        self.net1 = build_mlp(
+            input_dim=action_shape[0] + z1_dim + z2_dim,
+            output_dim=1,
+            hidden_units=hidden_units,
+            hidden_activation=nn.ReLU(inplace=True),
+        )
+        self.net2 = build_mlp(
+            input_dim=action_shape[0] + z1_dim + z2_dim,
+            output_dim=1,
+            hidden_units=hidden_units,
+            hidden_activation=nn.ReLU(inplace=True),
+        )
+
+    @torch.jit.script_method
+    def forward(self, latents, actions):
+        x = torch.cat([latents, actions], dim=1)
+        return self.net1(x), self.net2(x)
