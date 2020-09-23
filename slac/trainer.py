@@ -4,6 +4,7 @@ from datetime import timedelta
 from time import sleep, time
 
 import numpy as np
+import pandas as pd
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -74,6 +75,8 @@ class Trainer:
         self.algo = algo
 
         # Log setting.
+        self.log = {"step": [], "return": []}
+        self.csv_path = os.path.join(log_dir, "log.csv")
         self.log_dir = log_dir
         self.summary_dir = os.path.join(log_dir, "summary")
         self.writer = SummaryWriter(log_dir=self.summary_dir)
@@ -143,6 +146,12 @@ class Trainer:
 
             mean_return += episode_return / self.num_eval_episodes
 
+        # Log to CSV.
+        self.log["step"].append(step_env)
+        self.log["return"].append(mean_return)
+        pd.DataFrame(self.log).to_csv(self.csv_path, index=False)
+
+        # Log to TensorBoard.
         self.writer.add_scalar("return/test", mean_return, step_env)
         print(f"Steps: {step_env:<6}   " f"Return: {mean_return:<5.1f}   " f"Time: {self.time}")
 
