@@ -37,18 +37,22 @@ class LazySequenceBuff:
 
     def __init__(self, num_sequences=8):
         self.num_sequences = num_sequences
+        self.reset()
 
     def reset(self):
+        self._reset_episode = False
         self.state = deque(maxlen=self.num_sequences + 1)
         self.action = deque(maxlen=self.num_sequences)
         self.reward = deque(maxlen=self.num_sequences)
         self.done = deque(maxlen=self.num_sequences)
 
     def reset_episode(self, state):
-        self.reset()
+        assert not self._reset_episode
+        self._reset_episode = True
         self.state.append(state)
 
     def append(self, action, reward, done, next_state):
+        assert self._reset_episode
         self.action.append(action)
         self.reward.append(np.array([reward], dtype=np.float32))
         self.done.append(np.array([done], dtype=np.bool))
@@ -86,14 +90,14 @@ class ReplayBuffer:
     def reset_episode(self, state):
         self.buff.reset_episode(state)
 
-    def append(self, action, reward, done, next_state):
+    def append(self, action, reward, done, next_state, episode_done):
         self.buff.append(action, reward, done, next_state)
 
         if len(self.buff) == self.num_sequences + 1:
             state, action, reward, done = self.buff.get()
             self._append(state, action, reward, done)
 
-        if done:
+        if episode_done:
             self.buff.reset()
 
     def _append(self, state, action, reward, done):

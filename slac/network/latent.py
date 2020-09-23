@@ -179,9 +179,6 @@ class LatentModel(torch.jit.ScriptModule):
             std=np.sqrt(0.1),
         )
 
-        self.z1_dim = z1_dim
-        self.z2_dim = z2_dim
-
     @torch.jit.script_method
     def sample_prior(self, actions_):
         num_sequences = actions_.size(1)

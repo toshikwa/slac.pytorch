@@ -120,7 +120,7 @@ class SlacAlgorithm:
 
         state, reward, done, _ = env.step(action)
         mask = False if t == env._max_episode_steps else done
-        self.buffer.append(action, reward, mask, state)
+        self.buffer.append(action, reward, mask, state, done)
 
         if done:
             t = 0
