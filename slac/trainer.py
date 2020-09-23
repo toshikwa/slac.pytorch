@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 class SlacInput:
     """
-    Input for SLAC algorithm.
+    Input for SLAC.
     """
 
     def __init__(self, state_shape, action_shape, num_sequences):

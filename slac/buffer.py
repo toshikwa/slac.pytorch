@@ -123,7 +123,7 @@ class ReplayBuffer:
             reward_[i, ...] = self.reward[idx]
             done_[i, ...] = self.done[idx]
 
-        state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device)
+        state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
         action_ = torch.tensor(action_, dtype=torch.float, device=self.device)
         reward_ = torch.tensor(reward_, dtype=torch.float, device=self.device)
         done_ = torch.tensor(done_, dtype=torch.float, device=self.device)
@@ -141,7 +141,7 @@ class ReplayBuffer:
             action_[i, ...] = self.action[idx]
             reward[i, ...] = self.reward[idx][-1]
 
-        state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device)
+        state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
         action_ = torch.tensor(action_, dtype=torch.float, device=self.device)
         reward = torch.tensor(reward, dtype=torch.float, device=self.device)
         return state_, action_, reward

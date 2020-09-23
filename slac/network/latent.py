@@ -6,12 +6,6 @@ from torch.nn import functional as F
 from slac.utils import build_mlp, rsample
 
 
-class Floatify(torch.jit.ScriptModule):
-
-    def forward(self, x):
-        return x.float() / 255.0
-
-
 class FixedGaussian(torch.jit.ScriptModule):
     """
     Fixed diagonal gaussian distribution.
@@ -97,7 +91,6 @@ class Encoder(torch.jit.ScriptModule):
         super(Encoder, self).__init__()
 
         self.net = nn.Sequential(
-            Floatify(),
             # (3, 64, 64) -> (32, 32, 32)
             nn.Conv2d(input_dim, 32, 5, 2, 2),
             nn.LeakyReLU(0.2, inplace=True),
@@ -126,7 +119,7 @@ class Encoder(torch.jit.ScriptModule):
 
 class LatentModel(torch.jit.ScriptModule):
     """
-    Stochastic latent variable model to estimate latent dynamics and reward.
+    Stochastic latent variable model to estimate latent dynamics and the reward.
     """
 
     def __init__(
@@ -177,7 +170,7 @@ class LatentModel(torch.jit.ScriptModule):
             hidden_units,
         )
 
-        # feat(t) = x(t) : This encoding is performed deterministically.
+        # feat(t) = Encoder(x(t))
         self.encoder = Encoder(state_shape[0], feature_dim)
         # p(x(t) | z1(t), z2(t))
         self.decoder = Decoder(
@@ -193,90 +186,90 @@ class LatentModel(torch.jit.ScriptModule):
     def sample_prior(self, actions_):
         num_sequences = actions_.size(1)
 
-        z1_means = []
-        z1_stds = []
-        z1_samples = []
-        z2_means = []
-        z2_stds = []
-        z2_samples = []
+        z1_mean_ = []
+        z1_std_ = []
+        z1_ = []
+        z2_mean_ = []
+        z2_std_ = []
+        z2_ = []
 
         for t in range(num_sequences + 1):
             if t == 0:
                 # p(z1(0)) = N(0, I)
                 z1_mean, z1_std = self.z1_prior_init(actions_[:, 0])
-                z1_sample = rsample(z1_mean, z1_std)
+                z1 = rsample(z1_mean, z1_std)
 
                 # p(z2(0) | z1(0))
-                z2_mean, z2_std = self.z2_prior_init(z1_sample)
-                z2_sample = rsample(z2_mean, z2_std)
+                z2_mean, z2_std = self.z2_prior_init(z1)
+                z2 = rsample(z2_mean, z2_std)
 
             else:
                 # p(z1(t) | z2(t-1), a(t-1))
-                z1_mean, z1_std = self.z1_prior(torch.cat([z2_samples[t - 1], actions_[:, t - 1]], dim=1))
-                z1_sample = rsample(z1_mean, z1_std)
+                z1_mean, z1_std = self.z1_prior(torch.cat([z2_[t - 1], actions_[:, t - 1]], dim=1))
+                z1 = rsample(z1_mean, z1_std)
 
                 # p(z2(t) | z1(t), z2(t-1), a(t-1))
-                z2_mean, z2_std = self.z2_prior(torch.cat([z1_sample, z2_samples[t - 1], actions_[:, t - 1]], dim=1))
-                z2_sample = rsample(z2_mean, z2_std)
+                z2_mean, z2_std = self.z2_prior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
+                z2 = rsample(z2_mean, z2_std)
 
-            z1_means.append(z1_mean)
-            z1_stds.append(z1_std)
-            z1_samples.append(z1_sample)
-            z2_means.append(z2_mean)
-            z2_stds.append(z2_std)
-            z2_samples.append(z2_sample)
+            z1_mean_.append(z1_mean)
+            z1_std_.append(z1_std)
+            z1_.append(z1)
+            z2_mean_.append(z2_mean)
+            z2_std_.append(z2_std)
+            z2_.append(z2)
 
-        z1_means = torch.stack(z1_means, dim=1)
-        z1_stds = torch.stack(z1_stds, dim=1)
-        z1_samples = torch.stack(z1_samples, dim=1)
-        z2_means = torch.stack(z2_means, dim=1)
-        z2_stds = torch.stack(z2_stds, dim=1)
-        z2_samples = torch.stack(z2_samples, dim=1)
+        z1_mean_ = torch.stack(z1_mean_, dim=1)
+        z1_std_ = torch.stack(z1_std_, dim=1)
+        z1_ = torch.stack(z1_, dim=1)
+        z2_mean_ = torch.stack(z2_mean_, dim=1)
+        z2_std_ = torch.stack(z2_std_, dim=1)
+        z2_ = torch.stack(z2_, dim=1)
 
-        return (z1_means, z1_stds, z1_samples, z2_means, z2_stds, z2_samples)
+        return (z1_mean_, z1_std_, z1_, z2_mean_, z2_std_, z2_)
 
     @torch.jit.script_method
     def sample_post(self, features_, actions_):
         num_sequences = actions_.size(1)
 
-        z1_means = []
-        z1_stds = []
-        z1_samples = []
-        z2_means = []
-        z2_stds = []
-        z2_samples = []
+        z1_mean_ = []
+        z1_std_ = []
+        z1_ = []
+        z2_mean_ = []
+        z2_std_ = []
+        z2_ = []
 
         for t in range(num_sequences + 1):
             if t == 0:
                 # p(z1(0)) = N(0, I)
                 z1_mean, z1_std = self.z1_posterior_init(features_[:, 0])
-                z1_sample = rsample(z1_mean, z1_std)
+                z1 = rsample(z1_mean, z1_std)
 
                 # p(z2(0) | z1(0))
-                z2_mean, z2_std = self.z2_posterior_init(z1_sample)
-                z2_sample = rsample(z2_mean, z2_std)
+                z2_mean, z2_std = self.z2_posterior_init(z1)
+                z2 = rsample(z2_mean, z2_std)
 
             else:
                 # q(z1(t) | feat(t), z2(t-1), a(t-1))
-                z1_mean, z1_std = self.z1_posterior(torch.cat([features_[:, t], z2_samples[t - 1], actions_[:, t - 1]], dim=1))
-                z1_sample = rsample(z1_mean, z1_std)
+                z1_mean, z1_std = self.z1_posterior(torch.cat([features_[:, t], z2_[t - 1], actions_[:, t - 1]], dim=1))
+                z1 = rsample(z1_mean, z1_std)
 
                 # q(z2(t) | z1(t), z2(t-1), a(t-1))
-                z2_mean, z2_std = self.z2_posterior(torch.cat([z1_sample, z2_samples[t - 1], actions_[:, t - 1]], dim=1))
-                z2_sample = rsample(z2_mean, z2_std)
+                z2_mean, z2_std = self.z2_posterior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
+                z2 = rsample(z2_mean, z2_std)
 
-            z1_means.append(z1_mean)
-            z1_stds.append(z1_std)
-            z1_samples.append(z1_sample)
-            z2_means.append(z2_mean)
-            z2_stds.append(z2_std)
-            z2_samples.append(z2_sample)
+            z1_mean_.append(z1_mean)
+            z1_std_.append(z1_std)
+            z1_.append(z1)
+            z2_mean_.append(z2_mean)
+            z2_std_.append(z2_std)
+            z2_.append(z2)
 
-        z1_means = torch.stack(z1_means, dim=1)
-        z1_stds = torch.stack(z1_stds, dim=1)
-        z1_samples = torch.stack(z1_samples, dim=1)
-        z2_means = torch.stack(z2_means, dim=1)
-        z2_stds = torch.stack(z2_stds, dim=1)
-        z2_samples = torch.stack(z2_samples, dim=1)
+        z1_mean_ = torch.stack(z1_mean_, dim=1)
+        z1_std_ = torch.stack(z1_std_, dim=1)
+        z1_ = torch.stack(z1_, dim=1)
+        z2_mean_ = torch.stack(z2_mean_, dim=1)
+        z2_std_ = torch.stack(z2_std_, dim=1)
+        z2_ = torch.stack(z2_, dim=1)
 
-        return (z1_means, z1_stds, z1_samples, z2_means, z2_stds, z2_samples)
+        return (z1_mean_, z1_std_, z1_, z2_mean_, z2_std_, z2_)

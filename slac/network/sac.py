@@ -21,15 +21,15 @@ class GaussianPolicy(torch.jit.ScriptModule):
         )
 
     @torch.jit.script_method
-    def forward(self, x):
-        means = torch.chunk(self.net(x), 2, dim=-1)[0]
+    def forward(self, feature_action):
+        means = torch.chunk(self.net(feature_action), 2, dim=-1)[0]
         return torch.tanh(means)
 
     @torch.jit.script_method
-    def sample(self, x):
-        means, log_stds = torch.chunk(self.net(x), 2, dim=-1)
-        actions, log_pis = reparameterize(means, log_stds.clamp_(-20, 2))
-        return actions, log_pis
+    def sample(self, feature_action):
+        mean, log_std = torch.chunk(self.net(feature_action), 2, dim=-1)
+        action, log_pi = reparameterize(mean, log_std.clamp_(-20, 2))
+        return action, log_pi
 
 
 class TwinnedQNetwork(torch.jit.ScriptModule):
@@ -60,6 +60,6 @@ class TwinnedQNetwork(torch.jit.ScriptModule):
         )
 
     @torch.jit.script_method
-    def forward(self, latents, actions):
-        x = torch.cat([latents, actions], dim=1)
+    def forward(self, z, action):
+        x = torch.cat([z, action], dim=1)
         return self.net1(x), self.net2(x)

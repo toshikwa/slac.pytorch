@@ -4,20 +4,17 @@ import torch
 from torch import nn
 
 
-def create_feature_actions(features_, actions_):
-    N = features_.size(0)
-
-    # sequence of features
-    f = features_[:, :-1].view(N, -1)
-    n_f = features_[:, 1:].view(N, -1)
-    # sequence of actions
-    a = actions_[:, :-1].view(N, -1)
-    n_a = actions_[:, 1:].view(N, -1)
-
-    # feature_actions
+def create_feature_actions(feature_, action_):
+    N = feature_.size(0)
+    # Flatten sequence of features.
+    f = feature_[:, :-1].view(N, -1)
+    n_f = feature_[:, 1:].view(N, -1)
+    # Flatten sequence of actions.
+    a = action_[:, :-1].view(N, -1)
+    n_a = action_[:, 1:].view(N, -1)
+    # Concatenate feature and action.
     fa = torch.cat([f, a], dim=-1)
     n_fa = torch.cat([n_f, n_a], dim=-1)
-
     return fa, n_fa
 
 
@@ -57,21 +54,20 @@ def build_mlp(
     return nn.Sequential(*layers)
 
 
-def calculate_gaussian_log_prob(log_stds, noises):
-    return (-0.5 * noises.pow(2) - log_stds).sum(dim=-1, keepdim=True) - 0.5 * math.log(2 * math.pi) * log_stds.size(-1)
+def calculate_gaussian_log_prob(log_std, noise):
+    return (-0.5 * noise.pow(2) - log_std).sum(dim=-1, keepdim=True) - 0.5 * math.log(2 * math.pi) * log_std.size(-1)
 
 
-def calculate_log_pi(log_stds, noises, actions):
-    gaussian_log_probs = calculate_gaussian_log_prob(log_stds, noises)
-    return gaussian_log_probs - torch.log(1 - actions.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+def calculate_log_pi(log_std, noise, action):
+    gaussian_log_prob = calculate_gaussian_log_prob(log_std, noise)
+    return gaussian_log_prob - torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
 
 
-def rsample(means, stds):
-    return means + torch.rand_like(stds) * stds
+def rsample(mean, std):
+    return mean + torch.rand_like(std) * std
 
 
-def reparameterize(means, log_stds):
-    noises = torch.randn_like(means)
-    us = means + noises * log_stds.exp()
-    actions = torch.tanh(us)
-    return actions, calculate_log_pi(log_stds, noises, actions)
+def reparameterize(mean, log_std):
+    noise = torch.randn_like(mean)
+    action = torch.tanh(mean + noise * log_std.exp())
+    return action, calculate_log_pi(log_std, noise, action)

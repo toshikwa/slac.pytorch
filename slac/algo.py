@@ -16,6 +16,12 @@ from slac.utils import (
 
 
 class SlacAlgorithm:
+    """
+    Stochactic Latent Actor-Critic(SLAC).
+
+    Paper: https://arxiv.org/abs/1907.00953
+    """
+
     def __init__(
         self,
         state_shape,
@@ -85,7 +91,7 @@ class SlacAlgorithm:
         self.kl_divergence = torch.jit.trace(kl_divergence_loss, (fake_z1, fake_z1, fake_z1, fake_z1))
 
     def preprocess(self, input):
-        state = torch.tensor(input.state, dtype=torch.uint8, device=self.device)
+        state = torch.tensor(input.state, dtype=torch.uint8, device=self.device).float().div_(255.0)
         with torch.no_grad():
             feature = self.latent.encoder(state).view(1, -1)
         action = torch.tensor(input.action, dtype=torch.float, device=self.device)
