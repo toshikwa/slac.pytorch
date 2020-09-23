@@ -8,9 +8,9 @@ from slac.buffer import ReplayBuffer
 from slac.network import GaussianPolicy, LatentModel, TwinnedQNetwork
 from slac.utils import (
     calculate_gaussian_log_prob,
+    calculate_kl_divergence,
     create_feature_actions,
     grad_false,
-    kl_divergence_loss,
     soft_update,
 )
 
@@ -65,7 +65,7 @@ class SlacAlgorithm:
         with torch.no_grad():
             self.alpha = self.log_alpha.exp()
 
-        # NOTE: Policy is updated without the encoder.
+        # Optimizers.
         self.optim_actor = Adam(self.actor.parameters(), lr=lr_sac)
         self.optim_critic = Adam(self.critic.parameters(), lr=lr_sac)
         self.optim_alpha = Adam([self.log_alpha], lr=lr_sac)
@@ -82,13 +82,6 @@ class SlacAlgorithm:
         self.batch_size_latent = batch_size_latent
         self.num_sequences = num_sequences
         self.tau = tau
-
-        # JIT compile to speed up.
-        fake_feature = torch.empty(1, num_sequences + 1, feature_dim, device=device)
-        fake_action = torch.empty(1, num_sequences, action_shape[0], device=device)
-        fake_z1 = torch.empty(1, num_sequences + 1, z1_dim, device=device)
-        self.create_feature_actions = torch.jit.trace(create_feature_actions, (fake_feature, fake_action))
-        self.kl_divergence = torch.jit.trace(kl_divergence_loss, (fake_z1, fake_z1, fake_z1, fake_z1))
 
     def preprocess(self, input):
         state = torch.tensor(input.state, dtype=torch.uint8, device=self.device).float().div_(255.0)
@@ -137,29 +130,26 @@ class SlacAlgorithm:
         # Calculate the sequence of features.
         feature_ = self.latent.encoder(state_)
 
-        # Sample from posterior dynamics.
-        z1_mean_post_, z1_std_post_, z1_, z2_mean_post_, z2_std_post_, z2_ = self.latent.sample_post(feature_, action_)
-        # Sample from prior dynamics.
-        z1_mean_pri_, z1_std_pri_, _, z2_mean_pri_, z2_std_pri_, _ = self.latent.sample_prior(action_)
+        # Sample from latent variable model.
+        z1_mean_post_, z1_std_post_, z1_, z2_ = self.latent.sample_posterior(feature_, action_)
+        z1_mean_pri_, z1_std_pri_ = self.latent.sample_prior(action_)[:2]
 
         # Calculate KL divergence loss.
-        loss_kld = self.kl_divergence(z1_mean_post_, z1_std_post_, z1_mean_pri_, z1_mean_post_)
+        loss_kld = calculate_kl_divergence(z1_mean_post_, z1_std_post_, z1_mean_pri_, z1_std_pri_).mean(dim=0).sum()
 
-        # Reconstruction loss of images.
-        state_mean_, state_std_ = self.latent.decoder(torch.cat([z1_, z2_], dim=-1))
-        loss_image = -calculate_gaussian_log_prob(torch.log(state_std_), state_mean_ - state_).mean(dim=0).sum()
+        # Prediction loss of images.
+        z_ = torch.cat([z1_, z2_], dim=-1)
+        state_mean_, state_std_ = self.latent.decoder(z_)
+        log_likelihood_ = calculate_gaussian_log_prob(state_std_.log(), (state_mean_ - state_).div_(state_std_))
+        loss_image = -log_likelihood_.mean(dim=0).sum()
 
         # Prediction loss of rewards.
-        reward_mean_, reward_std_ = self.latent.reward(
-            torch.cat([z1_[:, :-1], z2_[:, :-1], action_, z1_[:, 1:], z2_[:, 1:]], dim=-1)
-        )
-        loss_reward = -calculate_gaussian_log_prob(torch.log(reward_std_), reward_mean_ - reward_) * (1.0 - done_)
-        loss_reward = loss_reward.mean(dim=0).sum()
-
-        loss_latent = loss_kld + loss_image + loss_reward
+        reward_mean_, reward_std_ = self.latent.reward(torch.cat([z_[:, :-1], action_, z_[:, 1:]], dim=-1))
+        log_likelihood_reward_ = calculate_gaussian_log_prob(reward_std_.log(), (reward_mean_ - reward_).div_(reward_std_))
+        loss_reward = -log_likelihood_reward_.mul_(1 - done_).mean(dim=0).sum()
 
         self.optim_latent.zero_grad()
-        loss_latent.backward()
+        (loss_kld + loss_image + loss_reward).backward()
         self.optim_latent.step()
 
         if self.learning_steps_latent % 1000 == 0:
@@ -170,25 +160,27 @@ class SlacAlgorithm:
     def update_sac(self, writer):
         self.learning_steps_sac += 1
         state_, action_, reward = self.buffer.sample_sac(self.batch_size_sac)
-
-        # NOTE: Don't update the encoder part of the policy here.
-        with torch.no_grad():
-            # f(1:t+1)
-            feature_ = self.latent.encoder(state_)
-            _, _, z1_, _, _, z2_ = self.latent.sample_post(feature_, action_)
-
-        # z(t), z(t+1)
-        z_ = torch.cat([z1_, z2_], dim=-1)
-        z = z_[:, -2]
-        next_z = z_[:, -1]
-        # a(t)
-        action = action_[:, -1]
-        # fa(t)=(x(1:t), a(1:t-1)), fa(t+1)=(x(2:t+1), a(2:t))
-        feature_action, next_feature_action = self.create_feature_actions(feature_, action_)
+        z, next_z, action, feature_action, next_feature_action = self.prepare_batch(state_, action_)
 
         self.update_critic(z, next_z, action, next_feature_action, reward, writer)
         self.update_actor(z, feature_action, writer)
         soft_update(self.critic_target, self.critic, self.tau)
+
+    def prepare_batch(self, state_, action_):
+        with torch.no_grad():
+            # f(1:t+1)
+            feature_ = self.latent.encoder(state_)
+            # z(1:t+1)
+            z_ = torch.cat(self.latent.sample_posterior(feature_, action_)[:2], dim=-1)
+
+        # z(t), z(t+1)
+        z, next_z = z_[:, -2], z_[:, -1]
+        # a(t)
+        action = action_[:, -1]
+        # fa(t)=(x(1:t), a(1:t-1)), fa(t+1)=(x(2:t+1), a(2:t))
+        feature_action, next_feature_action = create_feature_actions(feature_, action_)
+
+        return z, next_z, action, feature_action, next_feature_action
 
     def update_critic(self, z, next_z, action, next_feature_action, reward, writer):
         curr_q1, curr_q2 = self.critic(z, action)
@@ -197,8 +189,6 @@ class SlacAlgorithm:
             next_q1, next_q2 = self.critic_target(next_z, next_action)
             next_q = torch.min(next_q1, next_q2) - self.alpha * log_pi
         target_q = reward + self.gamma * next_q
-
-        # Critic's losses are mean squared TD errors.
         loss_critic = (curr_q1 - target_q).pow_(2).mean() + (curr_q2 - target_q).pow_(2).mean()
 
         self.optim_critic.zero_grad()
@@ -211,29 +201,26 @@ class SlacAlgorithm:
     def update_actor(self, z, feature_action, writer):
         action, log_pi = self.actor.sample(feature_action)
         q1, q2 = self.critic(z, action)
-
-        # Actor's objective is the maximization of (Q + alpha * entropy).
         loss_actor = torch.mean(-(torch.min(q1, q2) - self.alpha * log_pi))
 
         self.optim_actor.zero_grad()
         loss_actor.backward(retain_graph=False)
         self.optim_actor.step()
 
-        # Intuitively, we increse alpha when entropy is less than target entropy, vice versa.
-        entropy = -log_pi.detach_().mean()
+        with torch.no_grad():
+            entropy = -log_pi.detach().mean()
         loss_alpha = -self.log_alpha * (self.target_entropy - entropy)
 
         self.optim_alpha.zero_grad()
         loss_alpha.backward(retain_graph=False)
         self.optim_alpha.step()
-
         with torch.no_grad():
-            self.alpha = self.log_alpha.exp().item()
+            self.alpha = self.log_alpha.exp()
 
         if self.learning_steps_sac % 1000 == 0:
             writer.add_scalar("loss/actor", loss_actor.item(), self.learning_steps_sac)
             writer.add_scalar("loss/alpha", loss_alpha.item(), self.learning_steps_sac)
-            writer.add_scalar("stats/alpha", self.alpha, self.learning_steps_sac)
+            writer.add_scalar("stats/alpha", self.alpha.item(), self.learning_steps_sac)
             writer.add_scalar("stats/entropy", entropy.item(), self.learning_steps_sac)
 
     def save_model(self, save_dir):

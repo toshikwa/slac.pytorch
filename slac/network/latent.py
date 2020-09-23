@@ -182,12 +182,9 @@ class LatentModel(torch.jit.ScriptModule):
     @torch.jit.script_method
     def sample_prior(self, actions_):
         num_sequences = actions_.size(1)
-
         z1_mean_ = []
         z1_std_ = []
         z1_ = []
-        z2_mean_ = []
-        z2_std_ = []
         z2_ = []
 
         for t in range(num_sequences + 1):
@@ -212,28 +209,21 @@ class LatentModel(torch.jit.ScriptModule):
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)
             z1_.append(z1)
-            z2_mean_.append(z2_mean)
-            z2_std_.append(z2_std)
             z2_.append(z2)
 
         z1_mean_ = torch.stack(z1_mean_, dim=1)
         z1_std_ = torch.stack(z1_std_, dim=1)
         z1_ = torch.stack(z1_, dim=1)
-        z2_mean_ = torch.stack(z2_mean_, dim=1)
-        z2_std_ = torch.stack(z2_std_, dim=1)
         z2_ = torch.stack(z2_, dim=1)
 
-        return (z1_mean_, z1_std_, z1_, z2_mean_, z2_std_, z2_)
+        return (z1_mean_, z1_std_, z1_, z2_)
 
     @torch.jit.script_method
-    def sample_post(self, features_, actions_):
+    def sample_posterior(self, features_, actions_):
         num_sequences = actions_.size(1)
-
         z1_mean_ = []
         z1_std_ = []
         z1_ = []
-        z2_mean_ = []
-        z2_std_ = []
         z2_ = []
 
         for t in range(num_sequences + 1):
@@ -258,15 +248,11 @@ class LatentModel(torch.jit.ScriptModule):
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)
             z1_.append(z1)
-            z2_mean_.append(z2_mean)
-            z2_std_.append(z2_std)
             z2_.append(z2)
 
         z1_mean_ = torch.stack(z1_mean_, dim=1)
         z1_std_ = torch.stack(z1_std_, dim=1)
         z1_ = torch.stack(z1_, dim=1)
-        z2_mean_ = torch.stack(z2_mean_, dim=1)
-        z2_std_ = torch.stack(z2_std_, dim=1)
         z2_ = torch.stack(z2_, dim=1)
 
-        return (z1_mean_, z1_std_, z1_, z2_mean_, z2_std_, z2_)
+        return (z1_mean_, z1_std_, z1_, z2_)

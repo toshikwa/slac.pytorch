@@ -18,12 +18,6 @@ def create_feature_actions(feature_, action_):
     return fa, n_fa
 
 
-def kl_divergence_loss(p_mean, p_std, q_mean, q_std):
-    var_ratio = (p_std / q_std).pow(2)
-    t1 = ((p_mean - q_mean) / q_std).pow(2)
-    return 0.5 * (var_ratio + t1 - 1 - torch.log(var_ratio)).mean(dim=0).sum()
-
-
 def soft_update(target, source, tau):
     for t, s in zip(target.parameters(), source.parameters()):
         t.data.mul_(1.0 - tau)
@@ -71,3 +65,9 @@ def reparameterize(mean, log_std):
     noise = torch.randn_like(mean)
     action = torch.tanh(mean + noise * log_std.exp())
     return action, calculate_log_pi(log_std, noise, action)
+
+
+def calculate_kl_divergence(p_mean, p_std, q_mean, q_std):
+    var_ratio = (p_std / q_std).pow_(2)
+    t1 = ((p_mean - q_mean) / q_std).pow_(2)
+    return 0.5 * (var_ratio + t1 - 1 - var_ratio.log())
