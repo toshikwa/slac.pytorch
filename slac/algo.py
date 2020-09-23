@@ -6,13 +6,7 @@ from torch.optim import Adam
 
 from slac.buffer import ReplayBuffer
 from slac.network import GaussianPolicy, LatentModel, TwinnedQNetwork
-from slac.utils import (
-    calculate_gaussian_log_prob,
-    calculate_kl_divergence,
-    create_feature_actions,
-    grad_false,
-    soft_update,
-)
+from slac.utils import create_feature_actions, grad_false, soft_update
 
 
 class SlacAlgorithm:
@@ -54,7 +48,6 @@ class SlacAlgorithm:
         self.critic = TwinnedQNetwork(action_shape, z1_dim, z2_dim, hidden_units).to(device)
         self.critic_target = TwinnedQNetwork(action_shape, z1_dim, z2_dim, hidden_units).to(device)
         self.latent = LatentModel(state_shape, action_shape, feature_dim, z1_dim, z2_dim, hidden_units).to(device)
-
         soft_update(self.critic_target, self.critic, 1.0)
         grad_false(self.critic_target)
 
@@ -126,27 +119,7 @@ class SlacAlgorithm:
     def update_latent(self, writer):
         self.learning_steps_latent += 1
         state_, action_, reward_, done_ = self.buffer.sample_latent(self.batch_size_latent)
-
-        # Calculate the sequence of features.
-        feature_ = self.latent.encoder(state_)
-
-        # Sample from latent variable model.
-        z1_mean_post_, z1_std_post_, z1_, z2_ = self.latent.sample_posterior(feature_, action_)
-        z1_mean_pri_, z1_std_pri_ = self.latent.sample_prior(action_)[:2]
-
-        # Calculate KL divergence loss.
-        loss_kld = calculate_kl_divergence(z1_mean_post_, z1_std_post_, z1_mean_pri_, z1_std_pri_).mean(dim=0).sum()
-
-        # Prediction loss of images.
-        z_ = torch.cat([z1_, z2_], dim=-1)
-        state_mean_, state_std_ = self.latent.decoder(z_)
-        log_likelihood_ = calculate_gaussian_log_prob(state_std_.log(), (state_mean_ - state_).div_(state_std_))
-        loss_image = -log_likelihood_.mean(dim=0).sum()
-
-        # Prediction loss of rewards.
-        reward_mean_, reward_std_ = self.latent.reward(torch.cat([z_[:, :-1], action_, z_[:, 1:]], dim=-1))
-        log_likelihood_reward_ = calculate_gaussian_log_prob(reward_std_.log(), (reward_mean_ - reward_).div_(reward_std_))
-        loss_reward = -log_likelihood_reward_.mul_(1 - done_).mean(dim=0).sum()
+        loss_kld, loss_image, loss_reward = self.latent.calculate_loss(state_, action_, reward_, done_)
 
         self.optim_latent.zero_grad()
         (loss_kld + loss_image + loss_reward).backward()
@@ -201,7 +174,7 @@ class SlacAlgorithm:
     def update_actor(self, z, feature_action, writer):
         action, log_pi = self.actor.sample(feature_action)
         q1, q2 = self.critic(z, action)
-        loss_actor = torch.mean(-(torch.min(q1, q2) - self.alpha * log_pi))
+        loss_actor = -torch.mean(torch.min(q1, q2) - self.alpha * log_pi)
 
         self.optim_actor.zero_grad()
         loss_actor.backward(retain_graph=False)

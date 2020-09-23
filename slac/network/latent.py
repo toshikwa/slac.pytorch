@@ -3,7 +3,12 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from slac.utils import build_mlp, rsample
+from slac.utils import (
+    build_mlp,
+    calculate_gaussian_log_prob,
+    calculate_kl_divergence,
+    rsample,
+)
 
 
 class FixedGaussian(torch.jit.ScriptModule):
@@ -256,3 +261,28 @@ class LatentModel(torch.jit.ScriptModule):
         z2_ = torch.stack(z2_, dim=1)
 
         return (z1_mean_, z1_std_, z1_, z2_)
+
+    @torch.jit.script_method
+    def calculate_loss(self, state_, action_, reward_, done_):
+        # Calculate the sequence of features.
+        feature_ = self.encoder(state_)
+
+        # Sample from latent variable model.
+        z1_mean_post_, z1_std_post_, z1_, z2_ = self.sample_posterior(feature_, action_)
+        z1_mean_pri_, z1_std_pri_ = self.sample_prior(action_)[:2]
+
+        # Calculate KL divergence loss.
+        loss_kld = calculate_kl_divergence(z1_mean_post_, z1_std_post_, z1_mean_pri_, z1_std_pri_).mean(dim=0).sum()
+
+        # Prediction loss of images.
+        z_ = torch.cat([z1_, z2_], dim=-1)
+        state_mean_, state_std_ = self.decoder(z_)
+        log_likelihood_ = calculate_gaussian_log_prob(state_std_.log(), (state_mean_ - state_).div_(state_std_))
+        loss_image = -log_likelihood_.mean(dim=0).sum()
+
+        # Prediction loss of rewards.
+        reward_mean_, reward_std_ = self.reward(torch.cat([z_[:, :-1], action_, z_[:, 1:]], dim=-1))
+        log_likelihood_reward_ = calculate_gaussian_log_prob(reward_std_.log(), (reward_mean_ - reward_).div_(reward_std_))
+        loss_reward = -log_likelihood_reward_.mul_(1 - done_).mean(dim=0).sum()
+
+        return loss_kld, loss_image, loss_reward
