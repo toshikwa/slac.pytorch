@@ -186,30 +186,30 @@ class LatentModel(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def sample_prior(self, actions_):
-        num_sequences = actions_.size(1)
         z1_mean_ = []
         z1_std_ = []
         z1_ = []
         z2_ = []
 
-        for t in range(num_sequences + 1):
-            if t == 0:
-                # p(z1(0)) = N(0, I)
-                z1_mean, z1_std = self.z1_prior_init(actions_[:, 0])
-                z1 = rsample(z1_mean, z1_std)
+        # p(z1(0)) = N(0, I)
+        z1_mean, z1_std = self.z1_prior_init(actions_[:, 0])
+        z1 = rsample(z1_mean, z1_std)
+        # p(z2(0) | z1(0))
+        z2_mean, z2_std = self.z2_prior_init(z1)
+        z2 = rsample(z2_mean, z2_std)
 
-                # p(z2(0) | z1(0))
-                z2_mean, z2_std = self.z2_prior_init(z1)
-                z2 = rsample(z2_mean, z2_std)
+        z1_mean_.append(z1_mean)
+        z1_std_.append(z1_std)
+        z1_.append(z1)
+        z2_.append(z2)
 
-            else:
-                # p(z1(t) | z2(t-1), a(t-1))
-                z1_mean, z1_std = self.z1_prior(torch.cat([z2_[t - 1], actions_[:, t - 1]], dim=1))
-                z1 = rsample(z1_mean, z1_std)
-
-                # p(z2(t) | z1(t), z2(t-1), a(t-1))
-                z2_mean, z2_std = self.z2_prior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
-                z2 = rsample(z2_mean, z2_std)
+        for t in range(1, actions_.size(1) + 1):
+            # p(z1(t) | z2(t-1), a(t-1))
+            z1_mean, z1_std = self.z1_prior(torch.cat([z2_[t - 1], actions_[:, t - 1]], dim=1))
+            z1 = rsample(z1_mean, z1_std)
+            # p(z2(t) | z1(t), z2(t-1), a(t-1))
+            z2_mean, z2_std = self.z2_prior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
+            z2 = rsample(z2_mean, z2_std)
 
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)
@@ -225,30 +225,30 @@ class LatentModel(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def sample_posterior(self, features_, actions_):
-        num_sequences = actions_.size(1)
         z1_mean_ = []
         z1_std_ = []
         z1_ = []
         z2_ = []
 
-        for t in range(num_sequences + 1):
-            if t == 0:
-                # p(z1(0)) = N(0, I)
-                z1_mean, z1_std = self.z1_posterior_init(features_[:, 0])
-                z1 = rsample(z1_mean, z1_std)
+        # p(z1(0)) = N(0, I)
+        z1_mean, z1_std = self.z1_posterior_init(features_[:, 0])
+        z1 = rsample(z1_mean, z1_std)
+        # p(z2(0) | z1(0))
+        z2_mean, z2_std = self.z2_posterior_init(z1)
+        z2 = rsample(z2_mean, z2_std)
 
-                # p(z2(0) | z1(0))
-                z2_mean, z2_std = self.z2_posterior_init(z1)
-                z2 = rsample(z2_mean, z2_std)
+        z1_mean_.append(z1_mean)
+        z1_std_.append(z1_std)
+        z1_.append(z1)
+        z2_.append(z2)
 
-            else:
-                # q(z1(t) | feat(t), z2(t-1), a(t-1))
-                z1_mean, z1_std = self.z1_posterior(torch.cat([features_[:, t], z2_[t - 1], actions_[:, t - 1]], dim=1))
-                z1 = rsample(z1_mean, z1_std)
-
-                # q(z2(t) | z1(t), z2(t-1), a(t-1))
-                z2_mean, z2_std = self.z2_posterior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
-                z2 = rsample(z2_mean, z2_std)
+        for t in range(1, actions_.size(1) + 1):
+            # q(z1(t) | feat(t), z2(t-1), a(t-1))
+            z1_mean, z1_std = self.z1_posterior(torch.cat([features_[:, t], z2_[t - 1], actions_[:, t - 1]], dim=1))
+            z1 = rsample(z1_mean, z1_std)
+            # q(z2(t) | z1(t), z2(t-1), a(t-1))
+            z2_mean, z2_std = self.z2_posterior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
+            z2 = rsample(z2_mean, z2_std)
 
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)

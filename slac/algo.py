@@ -76,6 +76,11 @@ class SlacAlgorithm:
         self.num_sequences = num_sequences
         self.tau = tau
 
+        # JIT compile to speed up.
+        fake_feature = torch.empty(1, num_sequences + 1, feature_dim, device=device)
+        fake_action = torch.empty(1, num_sequences, action_shape[0], device=device)
+        self.create_feature_actions = torch.jit.trace(create_feature_actions, (fake_feature, fake_action))
+
     def preprocess(self, input):
         state = torch.tensor(input.state, dtype=torch.uint8, device=self.device).float().div_(255.0)
         with torch.no_grad():
@@ -151,7 +156,7 @@ class SlacAlgorithm:
         # a(t)
         action = action_[:, -1]
         # fa(t)=(x(1:t), a(1:t-1)), fa(t+1)=(x(2:t+1), a(2:t))
-        feature_action, next_feature_action = create_feature_actions(feature_, action_)
+        feature_action, next_feature_action = self.create_feature_actions(feature_, action_)
 
         return z, next_z, action, feature_action, next_feature_action
 

@@ -53,10 +53,10 @@ class Trainer:
         log_dir,
         seed=0,
         num_steps=3 * 10 ** 6,
-        initial_collection_steps=10 ** 4,
+        initial_collection_steps=10000,
         initial_learning_steps=10 ** 5,
         num_sequences=8,
-        eval_interval=5 * 10 ** 4,
+        eval_interval=10000,
         num_eval_episodes=5,
     ):
         # Env to collect samples.
