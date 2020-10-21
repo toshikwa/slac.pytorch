@@ -49,7 +49,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num_steps", type=int, default=3 * 10 ** 6)
+    parser.add_argument("--num_steps", type=int, default=2 * 10 ** 6)
     parser.add_argument("--domain_name", type=str, default="cheetah")
     parser.add_argument("--task_name", type=str, default="run")
     parser.add_argument("--action_repeat", type=int, default=4)
