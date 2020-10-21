@@ -252,7 +252,7 @@ class LatentModel(torch.jit.ScriptModule):
         return (z1_mean_, z1_std_, z1_, z2_)
 
     @torch.jit.script_method
-    def calculate_loss(self, state_, action_, reward_, done):
+    def calculate_loss(self, state_, action_, reward_, done_):
         # Calculate the sequence of features.
         feature_ = self.encoder(state_)
 
@@ -278,5 +278,5 @@ class LatentModel(torch.jit.ScriptModule):
         reward_std_ = reward_std_.view(B, S, 1)
         reward_noise_ = (reward_ - reward_mean_) / (reward_std_ + 1e-8)
         log_likelihood_reward_ = (-0.5 * reward_noise_.pow(2) - reward_std_.log()) - 0.5 * math.log(2 * math.pi)
-        loss_reward = -log_likelihood_reward_.sum(dim=1).mul_(1 - done).mean(dim=0).sum()
+        loss_reward = -log_likelihood_reward_.mul_(1 - done_).mean(dim=0).sum()
         return loss_kld, loss_image, loss_reward

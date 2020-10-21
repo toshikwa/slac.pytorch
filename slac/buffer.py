@@ -19,40 +19,53 @@ class LazyFrames:
         return len(self._frames)
 
 
-class SequenceBuff:
+class SequenceBuffer:
     """
-    Buffer to store a sequence of data efficiently.
+    Buffer for storing sequence data.
     """
 
     def __init__(self, num_sequences=8):
         self.num_sequences = num_sequences
-        self.reset()
+        self._reset_episode = False
+        self.state_ = deque(maxlen=self.num_sequences + 1)
+        self.action_ = deque(maxlen=self.num_sequences)
+        self.reward_ = deque(maxlen=self.num_sequences)
+        self.done_ = deque(maxlen=self.num_sequences)
 
     def reset(self):
         self._reset_episode = False
-        self.state = deque(maxlen=self.num_sequences + 1)
-        self.action = deque(maxlen=self.num_sequences)
-        self.reward = deque(maxlen=self.num_sequences)
+        self.state_.clear()
+        self.action_.clear()
+        self.reward_.clear()
+        self.done_.clear()
 
     def reset_episode(self, state):
         assert not self._reset_episode
         self._reset_episode = True
-        self.state.append(state)
+        self.state_.append(state)
 
-    def append(self, action, reward, next_state):
+    def append(self, action, reward, done, next_state):
         assert self._reset_episode
-        self.action.append(action)
-        self.reward.append([reward])
-        self.state.append(next_state)
+        self.action_.append(action)
+        self.reward_.append([reward])
+        self.done_.append([done])
+        self.state_.append(next_state)
 
-    def get(self, device):
-        state = LazyFrames(self.state)
-        action = np.array(self.action, dtype=np.float32)
-        reward = np.array(self.reward, dtype=np.float32)
-        return state, action, reward
+    def get(self):
+        state_ = LazyFrames(self.state_)
+        action_ = np.array(self.action_, dtype=np.float32)
+        reward_ = np.array(self.reward_, dtype=np.float32)
+        done_ = np.array(self.done_, dtype=np.float32)
+        return state_, action_, reward_, done_
+
+    def is_empty(self):
+        return len(self.reward_) == 0
+
+    def is_full(self):
+        return len(self.reward_) == self.num_sequences
 
     def __len__(self):
-        return len(self.reward)
+        return len(self.reward_)
 
 
 class ReplayBuffer:
@@ -74,9 +87,9 @@ class ReplayBuffer:
         # Store other data on GPU to reduce workloads.
         self.action_ = torch.empty(buffer_size, num_sequences, *action_shape, device=device)
         self.reward_ = torch.empty(buffer_size, num_sequences, 1, device=device)
-        self.done = torch.empty(buffer_size, 1, device=device)
+        self.done_ = torch.empty(buffer_size, num_sequences, 1, device=device)
         # Buffer to store a sequence of trajectories.
-        self.buff = SequenceBuff(num_sequences=self.num_sequences)
+        self.buff = SequenceBuffer(num_sequences=num_sequences)
 
     def reset_episode(self, state):
         """
@@ -89,20 +102,20 @@ class ReplayBuffer:
         Store trajectory in the buffer. If the buffer is full, the sequence of trajectories is stored in replay buffer.
         Please pass 'masked' and 'true' done so that we can assert if the start/end of an episode is handled properly.
         """
-        self.buff.append(action, reward, next_state)
+        self.buff.append(action, reward, done, next_state)
 
-        if len(self.buff) == self.num_sequences:
-            state_, action_, reward_ = self.buff.get(self.device)
-            self._append(state_, action_, reward_, done)
+        if self.buff.is_full():
+            state_, action_, reward_, done_ = self.buff.get()
+            self._append(state_, action_, reward_, done_)
 
         if episode_done:
             self.buff.reset()
 
-    def _append(self, state_, action_, reward_, done):
+    def _append(self, state_, action_, reward_, done_):
         self.state_[self._p] = state_
         self.action_[self._p].copy_(torch.from_numpy(action_))
         self.reward_[self._p].copy_(torch.from_numpy(reward_))
-        self.done[self._p] = float(done)
+        self.done_[self._p].copy_(torch.from_numpy(done_))
 
         self._n = min(self._n + 1, self.buffer_size)
         self._p = (self._p + 1) % self.buffer_size
@@ -116,7 +129,7 @@ class ReplayBuffer:
         for i, idx in enumerate(idxes):
             state_[i, ...] = self.state_[idx]
         state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
-        return state_, self.action_[idxes], self.reward_[idxes], self.done[idxes]
+        return state_, self.action_[idxes], self.reward_[idxes], self.done_[idxes]
 
     def sample_sac(self, batch_size):
         """
@@ -127,7 +140,7 @@ class ReplayBuffer:
         for i, idx in enumerate(idxes):
             state_[i, ...] = self.state_[idx]
         state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
-        return state_, self.action_[idxes], self.reward_[idxes, -1], self.done[idxes]
+        return state_, self.action_[idxes], self.reward_[idxes, -1], self.done_[idxes, -1]
 
     def __len__(self):
         return self._n
