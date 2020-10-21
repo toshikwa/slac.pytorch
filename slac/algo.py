@@ -124,8 +124,8 @@ class SlacAlgorithm:
 
     def update_latent(self, writer):
         self.learning_steps_latent += 1
-        state_, action_, reward_, done_ = self.buffer.sample_latent(self.batch_size_latent)
-        loss_kld, loss_image, loss_reward = self.latent.calculate_loss(state_, action_, reward_, done_)
+        state_, action_, reward_, done = self.buffer.sample_latent(self.batch_size_latent)
+        loss_kld, loss_image, loss_reward = self.latent.calculate_loss(state_, action_, reward_, done)
 
         self.optim_latent.zero_grad()
         (loss_kld + loss_image + loss_reward).backward()
