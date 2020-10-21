@@ -130,7 +130,7 @@ class ReplayBuffer:
         for i, idx in enumerate(idxes):
             state_[i, ...] = self.state[idx]
         state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
-        return state_, self.action[idxes], self.reward[idxes, -1]
+        return state_, self.action[idxes], self.reward[idxes, -1], self.done[idxes, -1]
 
     def __len__(self):
         return self._n

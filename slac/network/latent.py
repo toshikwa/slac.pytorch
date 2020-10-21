@@ -1,14 +1,11 @@
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from slac.utils import (
-    build_mlp,
-    calculate_gaussian_log_prob,
-    calculate_kl_divergence,
-    rsample,
-)
+from slac.utils import build_mlp, calculate_kl_divergence
 
 
 class FixedGaussian(torch.jit.ScriptModule):
@@ -188,40 +185,32 @@ class LatentModel(torch.jit.ScriptModule):
     def sample_prior(self, actions_):
         z1_mean_ = []
         z1_std_ = []
-        z1_ = []
-        z2_ = []
 
         # p(z1(0)) = N(0, I)
         z1_mean, z1_std = self.z1_prior_init(actions_[:, 0])
-        z1 = rsample(z1_mean, z1_std)
+        z1 = z1_mean + torch.rand_like(z1_std) * z1_std
         # p(z2(0) | z1(0))
         z2_mean, z2_std = self.z2_prior_init(z1)
-        z2 = rsample(z2_mean, z2_std)
+        z2 = z2_mean + torch.rand_like(z2_std) * z2_std
 
         z1_mean_.append(z1_mean)
         z1_std_.append(z1_std)
-        z1_.append(z1)
-        z2_.append(z2)
 
         for t in range(1, actions_.size(1) + 1):
             # p(z1(t) | z2(t-1), a(t-1))
-            z1_mean, z1_std = self.z1_prior(torch.cat([z2_[t - 1], actions_[:, t - 1]], dim=1))
-            z1 = rsample(z1_mean, z1_std)
+            z1_mean, z1_std = self.z1_prior(torch.cat([z2, actions_[:, t - 1]], dim=1))
+            z1 = z1_mean + torch.rand_like(z1_std) * z1_std
             # p(z2(t) | z1(t), z2(t-1), a(t-1))
-            z2_mean, z2_std = self.z2_prior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
-            z2 = rsample(z2_mean, z2_std)
+            z2_mean, z2_std = self.z2_prior(torch.cat([z1, z2, actions_[:, t - 1]], dim=1))
+            z2 = z2_mean + torch.rand_like(z2_std) * z2_std
 
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)
-            z1_.append(z1)
-            z2_.append(z2)
 
         z1_mean_ = torch.stack(z1_mean_, dim=1)
         z1_std_ = torch.stack(z1_std_, dim=1)
-        z1_ = torch.stack(z1_, dim=1)
-        z2_ = torch.stack(z2_, dim=1)
 
-        return (z1_mean_, z1_std_, z1_, z2_)
+        return (z1_mean_, z1_std_)
 
     @torch.jit.script_method
     def sample_posterior(self, features_, actions_):
@@ -232,10 +221,10 @@ class LatentModel(torch.jit.ScriptModule):
 
         # p(z1(0)) = N(0, I)
         z1_mean, z1_std = self.z1_posterior_init(features_[:, 0])
-        z1 = rsample(z1_mean, z1_std)
+        z1 = z1_mean + torch.rand_like(z1_std) * z1_std
         # p(z2(0) | z1(0))
         z2_mean, z2_std = self.z2_posterior_init(z1)
-        z2 = rsample(z2_mean, z2_std)
+        z2 = z2_mean + torch.rand_like(z2_std) * z2_std
 
         z1_mean_.append(z1_mean)
         z1_std_.append(z1_std)
@@ -244,11 +233,11 @@ class LatentModel(torch.jit.ScriptModule):
 
         for t in range(1, actions_.size(1) + 1):
             # q(z1(t) | feat(t), z2(t-1), a(t-1))
-            z1_mean, z1_std = self.z1_posterior(torch.cat([features_[:, t], z2_[t - 1], actions_[:, t - 1]], dim=1))
-            z1 = rsample(z1_mean, z1_std)
+            z1_mean, z1_std = self.z1_posterior(torch.cat([features_[:, t], z2, actions_[:, t - 1]], dim=1))
+            z1 = z1_mean + torch.rand_like(z1_std) * z1_std
             # q(z2(t) | z1(t), z2(t-1), a(t-1))
-            z2_mean, z2_std = self.z2_posterior(torch.cat([z1, z2_[t - 1], actions_[:, t - 1]], dim=1))
-            z2 = rsample(z2_mean, z2_std)
+            z2_mean, z2_std = self.z2_posterior(torch.cat([z1, z2, actions_[:, t - 1]], dim=1))
+            z2 = z2_mean + torch.rand_like(z2_std) * z2_std
 
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)
@@ -269,7 +258,7 @@ class LatentModel(torch.jit.ScriptModule):
 
         # Sample from latent variable model.
         z1_mean_post_, z1_std_post_, z1_, z2_ = self.sample_posterior(feature_, action_)
-        z1_mean_pri_, z1_std_pri_ = self.sample_prior(action_)[:2]
+        z1_mean_pri_, z1_std_pri_ = self.sample_prior(action_)
 
         # Calculate KL divergence loss.
         loss_kld = calculate_kl_divergence(z1_mean_post_, z1_std_post_, z1_mean_pri_, z1_std_pri_).mean(dim=0).sum()
@@ -277,12 +266,17 @@ class LatentModel(torch.jit.ScriptModule):
         # Prediction loss of images.
         z_ = torch.cat([z1_, z2_], dim=-1)
         state_mean_, state_std_ = self.decoder(z_)
-        log_likelihood_ = calculate_gaussian_log_prob(state_std_.log(), (state_mean_ - state_).div_(state_std_))
+        state_noise_ = (state_ - state_mean_) / (state_std_ + 1e-8)
+        log_likelihood_ = (-0.5 * state_noise_.pow(2) - state_std_.log()) - 0.5 * math.log(2 * math.pi)
         loss_image = -log_likelihood_.mean(dim=0).sum()
 
         # Prediction loss of rewards.
-        reward_mean_, reward_std_ = self.reward(torch.cat([z_[:, :-1], action_, z_[:, 1:]], dim=-1))
-        log_likelihood_reward_ = calculate_gaussian_log_prob(reward_std_.log(), (reward_mean_ - reward_).div_(reward_std_))
+        x = torch.cat([z_[:, :-1], action_, z_[:, 1:]], dim=-1)
+        B, S, X = x.shape
+        reward_mean_, reward_std_ = self.reward(x.view(B * S, X))
+        reward_mean_ = reward_mean_.view(B, S, 1)
+        reward_std_ = reward_std_.view(B, S, 1)
+        reward_noise_ = (reward_ - reward_mean_) / (reward_std_ + 1e-8)
+        log_likelihood_reward_ = (-0.5 * reward_noise_.pow(2) - reward_std_.log()) - 0.5 * math.log(2 * math.pi)
         loss_reward = -log_likelihood_reward_.mul_(1 - done_).mean(dim=0).sum()
-
         return loss_kld, loss_image, loss_reward

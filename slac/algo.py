@@ -111,12 +111,13 @@ class SlacAlgorithm:
 
         state, reward, done, _ = env.step(action)
         mask = False if t == env._max_episode_steps else done
+        input.append(state, action)
         self.buffer.append(action, reward, mask, state, done)
 
         if done:
             t = 0
             state = env.reset()
-            input.append(state, action)
+            input.reset_episode(state)
             self.buffer.reset_episode(state)
 
         return t
@@ -137,10 +138,10 @@ class SlacAlgorithm:
 
     def update_sac(self, writer):
         self.learning_steps_sac += 1
-        state_, action_, reward = self.buffer.sample_sac(self.batch_size_sac)
+        state_, action_, reward, done = self.buffer.sample_sac(self.batch_size_sac)
         z, next_z, action, feature_action, next_feature_action = self.prepare_batch(state_, action_)
 
-        self.update_critic(z, next_z, action, next_feature_action, reward, writer)
+        self.update_critic(z, next_z, action, next_feature_action, reward, done, writer)
         self.update_actor(z, feature_action, writer)
         soft_update(self.critic_target, self.critic, self.tau)
 
@@ -160,13 +161,13 @@ class SlacAlgorithm:
 
         return z, next_z, action, feature_action, next_feature_action
 
-    def update_critic(self, z, next_z, action, next_feature_action, reward, writer):
+    def update_critic(self, z, next_z, action, next_feature_action, reward, done, writer):
         curr_q1, curr_q2 = self.critic(z, action)
         with torch.no_grad():
             next_action, log_pi = self.actor.sample(next_feature_action)
             next_q1, next_q2 = self.critic_target(next_z, next_action)
             next_q = torch.min(next_q1, next_q2) - self.alpha * log_pi
-        target_q = reward + self.gamma * next_q
+        target_q = reward + (1.0 - done) * self.gamma * next_q
         loss_critic = (curr_q1 - target_q).pow_(2).mean() + (curr_q2 - target_q).pow_(2).mean()
 
         self.optim_critic.zero_grad()

@@ -57,10 +57,6 @@ def calculate_log_pi(log_std, noise, action):
     return gaussian_log_prob - torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
 
 
-def rsample(mean, std):
-    return mean + torch.rand_like(std) * std
-
-
 def reparameterize(mean, log_std):
     noise = torch.randn_like(mean)
     action = torch.tanh(mean + noise * log_std.exp())
