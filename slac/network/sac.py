@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+from slac.network.initializer import initialize_weight
 from slac.utils import build_mlp, reparameterize
 
 
@@ -18,7 +19,7 @@ class GaussianPolicy(torch.jit.ScriptModule):
             output_dim=2 * action_shape[0],
             hidden_units=hidden_units,
             hidden_activation=nn.ReLU(inplace=True),
-        )
+        ).apply(initialize_weight)
 
     @torch.jit.script_method
     def forward(self, feature_action):
@@ -51,13 +52,13 @@ class TwinnedQNetwork(torch.jit.ScriptModule):
             output_dim=1,
             hidden_units=hidden_units,
             hidden_activation=nn.ReLU(inplace=True),
-        )
+        ).apply(initialize_weight)
         self.net2 = build_mlp(
             input_dim=action_shape[0] + z1_dim + z2_dim,
             output_dim=1,
             hidden_units=hidden_units,
             hidden_activation=nn.ReLU(inplace=True),
-        )
+        ).apply(initialize_weight)
 
     @torch.jit.script_method
     def forward(self, z, action):

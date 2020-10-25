@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from slac.network.initializer import initialize_weight
 from slac.utils import build_mlp, calculate_kl_divergence
 
 
@@ -37,7 +38,7 @@ class Gaussian(torch.jit.ScriptModule):
             output_dim=2 * output_dim,
             hidden_units=hidden_units,
             hidden_activation=nn.LeakyReLU(0.2),
-        )
+        ).apply(initialize_weight)
 
     @torch.jit.script_method
     def forward(self, x):
@@ -71,7 +72,7 @@ class Decoder(torch.jit.ScriptModule):
             # (32, 32, 32) -> (3, 64, 64)
             nn.ConvTranspose2d(32, 3, 5, 2, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
-        )
+        ).apply(initialize_weight)
         self.std = std
 
     @torch.jit.script_method
@@ -108,7 +109,7 @@ class Encoder(torch.jit.ScriptModule):
             # (256, 4, 4) -> (256, 1, 1)
             nn.Conv2d(256, output_dim, 4),
             nn.LeakyReLU(0.2, inplace=True),
-        )
+        ).apply(initialize_weight)
 
     @torch.jit.script_method
     def forward(self, x):
@@ -180,6 +181,7 @@ class LatentModel(torch.jit.ScriptModule):
             state_shape[0],
             std=np.sqrt(0.1),
         )
+        self.apply(initialize_weight)
 
     @torch.jit.script_method
     def sample_prior(self, actions_):
