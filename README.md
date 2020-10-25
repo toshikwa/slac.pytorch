@@ -1,37 +1,30 @@
 # Stochastic Latent Actor-Critic in PyTorch
-A PyTorch implementation of Stochastic Latent Actor-Critic[[1]](#references). I tried to make it easy for readers to understand the algorithm. Please let me know if you have any questions.
+A PyTorch implementation of Stochastic Latent Actor-Critic[[1]](#references) for [DeepMind Control Suite](https://github.com/deepmind/dm_control). I tried to make it easy for readers to understand the algorithm. Please let me know if you have any questions.
 
 **UPDATE**
+- 2020.10.26
+    - Refactor codes and speed up training.
 - 2020.8.28
     - Bump torch up to 1.6.0.
 
 ## Requirements
-You can install liblaries using `pip install -r requirements.txt` except [mujoco_py](https://github.com/openai/mujoco-py) and [dm_control](https://github.com/deepmind/dm_control). Note that you need a licence to install mujoco_py. For installation, please follow instructions [here](https://github.com/deepmind/dm_control).
+You can install Python liblaries using `pip install -r requirements.txt`. Note that you need a MuJoCo license. Please follow the instruction in [mujoco-py](https://github.com/openai/mujoco-py) for help.
 
-If you're using other than CUDA 10.2, you may need to install the proper version of PyTorch for CUDA. See [instructions](https://pytorch.org/get-started/locally/) for more details.
+If you're using other than CUDA 10.2, please install PyTorch following [instructions](https://pytorch.org/get-started/locally/) here.
 
 
 ## Examples
-You can train SLAC agent on the task from DeepMind Control Suite like this example [here](https://github.com/ku2482/slac.pytorch/blob/master/code/main.py). Hyperparameters except `action_repeat` are constant across all tasks. Please refer to Appendix B of the paper for details.
+You can train SLAC algorithm as shown in the following example. Hyperparameters except action repeat are constant across all tasks. Please refer to Appendix B of the paper for more details.
 
 ```
-python code/main.py \
---env_type dm_control \
---domain_name cheetah \
---task_name run \
---action_repeat 4 \
---seed 0 \
---cuda (optional)
+python train.py --domain_name cheetah --task_name run --action_repeat 4 --seed 0 --cuda
 ```
 
-I haven't tested on the OpenAI Gym(MuJoCo) benchmark tasks due to OpenGL issues.
-
-## Results
-Result of above example on Cheetah run and Walker walk tasks are below. Note that the horizontal axis represents environment steps, which equals agent's steps multiplied by `action_repeat`.
+Results on `cheetah-run` and `walker-walk` are as follows. Note that the horizontal axis represents environment steps, which equals to agent's steps multiplied by action repeat.
 
 <img src="https://user-images.githubusercontent.com/37267851/69509282-c3e23f80-0f7b-11ea-8862-299872a5b89b.png" width=410><img src="https://user-images.githubusercontent.com/37267851/69509339-f724ce80-0f7b-11ea-8df8-eb5d8aaa57fa.png" width=410>
 
-Visualizations of image sequence corresponding to Figure 9 of the paper are below. First row is ground truth, second row is generated image from posterior sample (of the latent model), third row is generated image from prior sample only conditioned on the initial frame and last row is generated image from prior sample. Please refer to the paper for details.
+Visualization of image sequence corresponding to Figure 9 in the paper is as follows. First row is ground truth, second row is generated image from posterior sample (from the latent model), third row is generated image from prior sample only conditioned on the initial frame and last row is generated image from prior sample. Please refer to the paper for details.
 
 <img src="https://user-images.githubusercontent.com/37267851/69476615-6802a400-0e1f-11ea-919d-b7958413efab.png" title="sequence" width=750>
 

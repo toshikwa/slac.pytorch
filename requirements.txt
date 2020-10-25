@@ -1,6 +1,7 @@
+tqdm==4.48.2
 numpy==1.18.4
-pillow==7.1.2
 torch==1.6.0
-tensorboard==2.2.2
 gym==0.17.2
+pandas==1.1.2
+tensorboard==2.2.2
 git+https://github.com/deepmind/dm_control
