@@ -81,43 +81,43 @@ class SlacAlgorithm:
         fake_action = torch.empty(1, num_sequences, action_shape[0], device=device)
         self.create_feature_actions = torch.jit.trace(create_feature_actions, (fake_feature, fake_action))
 
-    def preprocess(self, input):
-        state = torch.tensor(input.state, dtype=torch.uint8, device=self.device).float().div_(255.0)
+    def preprocess(self, ob):
+        state = torch.tensor(ob.state, dtype=torch.uint8, device=self.device).float().div_(255.0)
         with torch.no_grad():
             feature = self.latent.encoder(state).view(1, -1)
-        action = torch.tensor(input.action, dtype=torch.float, device=self.device)
+        action = torch.tensor(ob.action, dtype=torch.float, device=self.device)
         feature_action = torch.cat([feature, action], dim=1)
         return feature_action
 
-    def explore(self, input):
-        feature_action = self.preprocess(input)
+    def explore(self, ob):
+        feature_action = self.preprocess(ob)
         with torch.no_grad():
             action = self.actor.sample(feature_action)[0]
         return action.cpu().numpy()[0]
 
-    def exploit(self, input):
-        feature_action = self.preprocess(input)
+    def exploit(self, ob):
+        feature_action = self.preprocess(ob)
         with torch.no_grad():
             action = self.actor(feature_action)
         return action.cpu().numpy()[0]
 
-    def step(self, env, input, t, is_random):
+    def step(self, env, ob, t, is_random):
         t += 1
 
         if is_random:
             action = env.action_space.sample()
         else:
-            action = self.explore(input)
+            action = self.explore(ob)
 
         state, reward, done, _ = env.step(action)
         mask = False if t == env._max_episode_steps else done
-        input.append(state, action)
+        ob.append(state, action)
         self.buffer.append(action, reward, mask, state, done)
 
         if done:
             t = 0
             state = env.reset()
-            input.reset_episode(state)
+            ob.reset_episode(state)
             self.buffer.reset_episode(state)
 
         return t
