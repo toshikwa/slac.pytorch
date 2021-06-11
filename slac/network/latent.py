@@ -190,10 +190,10 @@ class LatentModel(torch.jit.ScriptModule):
 
         # p(z1(0)) = N(0, I)
         z1_mean, z1_std = self.z1_prior_init(actions_[:, 0])
-        z1 = z1_mean + torch.rand_like(z1_std) * z1_std
+        z1 = z1_mean + torch.randn_like(z1_std) * z1_std
         # p(z2(0) | z1(0))
         z2_mean, z2_std = self.z2_prior_init(z1)
-        z2 = z2_mean + torch.rand_like(z2_std) * z2_std
+        z2 = z2_mean + torch.randn_like(z2_std) * z2_std
 
         z1_mean_.append(z1_mean)
         z1_std_.append(z1_std)
@@ -201,10 +201,10 @@ class LatentModel(torch.jit.ScriptModule):
         for t in range(1, actions_.size(1) + 1):
             # p(z1(t) | z2(t-1), a(t-1))
             z1_mean, z1_std = self.z1_prior(torch.cat([z2, actions_[:, t - 1]], dim=1))
-            z1 = z1_mean + torch.rand_like(z1_std) * z1_std
+            z1 = z1_mean + torch.randn_like(z1_std) * z1_std
             # p(z2(t) | z1(t), z2(t-1), a(t-1))
             z2_mean, z2_std = self.z2_prior(torch.cat([z1, z2, actions_[:, t - 1]], dim=1))
-            z2 = z2_mean + torch.rand_like(z2_std) * z2_std
+            z2 = z2_mean + torch.randn_like(z2_std) * z2_std
 
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)
@@ -223,10 +223,10 @@ class LatentModel(torch.jit.ScriptModule):
 
         # p(z1(0)) = N(0, I)
         z1_mean, z1_std = self.z1_posterior_init(features_[:, 0])
-        z1 = z1_mean + torch.rand_like(z1_std) * z1_std
+        z1 = z1_mean + torch.randn_like(z1_std) * z1_std
         # p(z2(0) | z1(0))
         z2_mean, z2_std = self.z2_posterior_init(z1)
-        z2 = z2_mean + torch.rand_like(z2_std) * z2_std
+        z2 = z2_mean + torch.randn_like(z2_std) * z2_std
 
         z1_mean_.append(z1_mean)
         z1_std_.append(z1_std)
@@ -236,10 +236,10 @@ class LatentModel(torch.jit.ScriptModule):
         for t in range(1, actions_.size(1) + 1):
             # q(z1(t) | feat(t), z2(t-1), a(t-1))
             z1_mean, z1_std = self.z1_posterior(torch.cat([features_[:, t], z2, actions_[:, t - 1]], dim=1))
-            z1 = z1_mean + torch.rand_like(z1_std) * z1_std
+            z1 = z1_mean + torch.randn_like(z1_std) * z1_std
             # q(z2(t) | z1(t), z2(t-1), a(t-1))
             z2_mean, z2_std = self.z2_posterior(torch.cat([z1, z2, actions_[:, t - 1]], dim=1))
-            z2 = z2_mean + torch.rand_like(z2_std) * z2_std
+            z2 = z2_mean + torch.randn_like(z2_std) * z2_std
 
             z1_mean_.append(z1_mean)
             z1_std_.append(z1_std)
