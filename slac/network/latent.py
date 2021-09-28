@@ -42,7 +42,11 @@ class Gaussian(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        x = self.net(x)
+        if x.ndim == 3:
+            B, S, _ = x.size()
+            x = self.net(x.view(B * S, _)).view(B, S, -1)
+        else:
+            x = self.net(x)
         mean, std = torch.chunk(x, 2, dim=-1)
         std = F.softplus(std) + 1e-5
         return mean, std
@@ -70,7 +74,7 @@ class Decoder(torch.jit.ScriptModule):
             nn.ConvTranspose2d(64, 32, 3, 2, 1, 1),
             nn.LeakyReLU(0.2, inplace=True),
             # (32, 32, 32) -> (3, 64, 64)
-            nn.ConvTranspose2d(32, 3, 5, 2, 2, 1),
+            nn.ConvTranspose2d(32, output_dim, 5, 2, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
         ).apply(initialize_weight)
         self.std = std
@@ -135,7 +139,6 @@ class LatentModel(torch.jit.ScriptModule):
         hidden_units=(256, 256),
     ):
         super(LatentModel, self).__init__()
-
         # p(z1(0)) = N(0, I)
         self.z1_prior_init = FixedGaussian(z1_dim, 1.0)
         # p(z2(0) | z1(0))
@@ -184,43 +187,18 @@ class LatentModel(torch.jit.ScriptModule):
         self.apply(initialize_weight)
 
     @torch.jit.script_method
-    def sample_prior(self, actions_):
-        z1_mean_ = []
-        z1_std_ = []
-
+    def sample_prior(self, actions_, z2_post_):
         # p(z1(0)) = N(0, I)
-        z1_mean, z1_std = self.z1_prior_init(actions_[:, 0])
-        z1 = z1_mean + torch.randn_like(z1_std) * z1_std
-        # p(z2(0) | z1(0))
-        z2_mean, z2_std = self.z2_prior_init(z1)
-        z2 = z2_mean + torch.randn_like(z2_std) * z2_std
-
-        z1_mean_.append(z1_mean)
-        z1_std_.append(z1_std)
-
-        for t in range(1, actions_.size(1) + 1):
-            # p(z1(t) | z2(t-1), a(t-1))
-            z1_mean, z1_std = self.z1_prior(torch.cat([z2, actions_[:, t - 1]], dim=1))
-            z1 = z1_mean + torch.randn_like(z1_std) * z1_std
-            # p(z2(t) | z1(t), z2(t-1), a(t-1))
-            z2_mean, z2_std = self.z2_prior(torch.cat([z1, z2, actions_[:, t - 1]], dim=1))
-            z2 = z2_mean + torch.randn_like(z2_std) * z2_std
-
-            z1_mean_.append(z1_mean)
-            z1_std_.append(z1_std)
-
-        z1_mean_ = torch.stack(z1_mean_, dim=1)
-        z1_std_ = torch.stack(z1_std_, dim=1)
-
+        z1_mean_init, z1_std_init = self.z1_prior_init(actions_[:, 0])
+        # p(z1(t) | z2(t-1), a(t-1))
+        z1_mean_, z1_std_ = self.z1_prior(torch.cat([z2_post_[:, : actions_.size(1)], actions_], dim=-1))
+        # Concatenate initial and consecutive latent variables
+        z1_mean_ = torch.cat([z1_mean_init.unsqueeze(1), z1_mean_], dim=1)
+        z1_std_ = torch.cat([z1_std_init.unsqueeze(1), z1_std_], dim=1)
         return (z1_mean_, z1_std_)
 
     @torch.jit.script_method
     def sample_posterior(self, features_, actions_):
-        z1_mean_ = []
-        z1_std_ = []
-        z1_ = []
-        z2_ = []
-
         # p(z1(0)) = N(0, I)
         z1_mean, z1_std = self.z1_posterior_init(features_[:, 0])
         z1 = z1_mean + torch.randn_like(z1_std) * z1_std
@@ -228,10 +206,10 @@ class LatentModel(torch.jit.ScriptModule):
         z2_mean, z2_std = self.z2_posterior_init(z1)
         z2 = z2_mean + torch.randn_like(z2_std) * z2_std
 
-        z1_mean_.append(z1_mean)
-        z1_std_.append(z1_std)
-        z1_.append(z1)
-        z2_.append(z2)
+        z1_mean_ = [z1_mean]
+        z1_std_ = [z1_std]
+        z1_ = [z1]
+        z2_ = [z2]
 
         for t in range(1, actions_.size(1) + 1):
             # q(z1(t) | feat(t), z2(t-1), a(t-1))
@@ -250,7 +228,6 @@ class LatentModel(torch.jit.ScriptModule):
         z1_std_ = torch.stack(z1_std_, dim=1)
         z1_ = torch.stack(z1_, dim=1)
         z2_ = torch.stack(z2_, dim=1)
-
         return (z1_mean_, z1_std_, z1_, z2_)
 
     @torch.jit.script_method
@@ -260,7 +237,7 @@ class LatentModel(torch.jit.ScriptModule):
 
         # Sample from latent variable model.
         z1_mean_post_, z1_std_post_, z1_, z2_ = self.sample_posterior(feature_, action_)
-        z1_mean_pri_, z1_std_pri_ = self.sample_prior(action_)
+        z1_mean_pri_, z1_std_pri_ = self.sample_prior(action_, z2_)
 
         # Calculate KL divergence loss.
         loss_kld = calculate_kl_divergence(z1_mean_post_, z1_std_post_, z1_mean_pri_, z1_std_pri_).mean(dim=0).sum()
