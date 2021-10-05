@@ -2,6 +2,8 @@
 A PyTorch implementation of Stochastic Latent Actor-Critic[[1]](#references) for [DeepMind Control Suite](https://github.com/deepmind/dm_control). I tried to make it easy for readers to understand the algorithm. Please let me know if you have any questions.
 
 **UPDATE**
+- 2021.10.6
+    - Refactor codes to be compatible with original impl.
 - 2020.10.26
     - Refactor codes and speed up training.
 - 2020.8.28
@@ -20,9 +22,9 @@ You can train SLAC algorithm as shown in the following example. Hyperparameters 
 python train.py --domain_name cheetah --task_name run --action_repeat 4 --seed 0 --cuda
 ```
 
-Results on `cheetah-run` and `walker-walk` are as follows. Note that the horizontal axis represents environment steps, which equals to agent's steps multiplied by action repeat.
+Results (averaged over 2 seeds) on `cheetah-run` and `walker-walk` are as follows. Note that the horizontal axis represents environment steps, which equals to agent's steps multiplied by action repeat.
 
-<img src="https://user-images.githubusercontent.com/37267851/69509282-c3e23f80-0f7b-11ea-8862-299872a5b89b.png" width=410><img src="https://user-images.githubusercontent.com/37267851/69509339-f724ce80-0f7b-11ea-8df8-eb5d8aaa57fa.png" width=410>
+<img src="https://user-images.githubusercontent.com/37267851/136091614-bf36f6e2-991a-45d1-8b8e-8f22718dbbe3.png" width=410>  <img src="https://user-images.githubusercontent.com/37267851/136091624-1bfcf519-3697-4b1e-aad0-4b5211fc64e2.png" width=410>
 
 Visualization of image sequence corresponding to Figure 9 in the paper is as follows. First row is ground truth, second row is generated image from posterior sample (from the latent model), third row is generated image from prior sample only conditioned on the initial frame and last row is generated image from prior sample. Please refer to the paper for details.
 
