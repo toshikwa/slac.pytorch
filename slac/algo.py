@@ -150,7 +150,7 @@ class SlacAlgorithm:
             # f(1:t+1)
             feature_ = self.latent.encoder(state_)
             # z(1:t+1)
-            z_ = torch.cat(self.latent.sample_posterior(feature_, action_)[2:], dim=-1)
+            z_ = torch.cat(self.latent.sample_posterior(feature_, action_)[2:4], dim=-1)
 
         # z(t), z(t+1)
         z, next_z = z_[:, -2], z_[:, -1]
