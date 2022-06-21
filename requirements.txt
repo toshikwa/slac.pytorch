@@ -1,5 +1,5 @@
 tqdm==4.48.2
-numpy==1.18.4
+numpy==1.22.0
 torch==1.6.0
 gym==0.17.2
 pandas==1.1.2
