@@ -29,7 +29,7 @@ class GaussianPolicy(torch.jit.ScriptModule):
     @torch.jit.script_method
     def sample(self, feature_action):
         mean, log_std = torch.chunk(self.net(feature_action), 2, dim=-1)
-        action, log_pi = reparameterize(mean, log_std.clamp_(-20, 2))
+        action, log_pi = reparameterize(mean, log_std.clamp(-20, 2))
         return action, log_pi
 
 
